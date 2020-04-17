@@ -1,6 +1,8 @@
 #include "bf.h"
 #include "minirel.h"
-#include "stdio.h"
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 int BF_size;//Buffer size
 typedef struct BFpage {
@@ -12,13 +14,13 @@ typedef struct BFpage {
   int            pageNum;     /* page number of this page                */
   int            fd;          /* PF file descriptor of this page         */
   int            unixfd;      /* Unix file descriptor of this page       */
-} BFpage *head,*tail;
-
+} BFpage;
+BFpage *head,*tail;
 typedef struct Free_List {
   struct BFpage *bpage;               /* ptr to buffer holding this page */
   struct Free_List  *nextentry;   /* next in the linked list of buffer pages */
-} Free_List *head_free;
-
+} Free_List;
+Free_List *head_free;
 typedef struct BFhash_entry {
   struct BFhash_entry *nextentry;     /* next hash table element or NULL */
   struct BFhash_entry *preventry;     /* prev hash table element or NULL */
@@ -53,7 +55,7 @@ BFpage* BF_get_from_hash(BFreq bq) {
     int hash_value = (bq.fd * 263 + bq.pagenum) % BF_HASH_TBL_SIZE;
     BFhash_entry *head = hash_table[hash_value];
     while (head != NULL) {
-        if (head -> fd = bq.fd && head -> pageNum = bq.pagenum)
+        if (head -> fd == bq.fd && head -> pageNum == bq.pagenum)
             return head -> bpage;
         head = head -> nextentry;
     }
@@ -63,11 +65,11 @@ void BF_remove_from_hash(int fd,int pageNum) {
     int hash_value = (fd * 263 + pageNum) % BF_HASH_TBL_SIZE;
     BFhash_entry *del = hash_table[hash_value];
     while (del != NULL) {
-        if (del -> fd = fd && del -> pageNum = pageNum) {
+        if (del -> fd == fd && del -> pageNum == pageNum) {
             if (del -> nextentry != NULL)
                 del -> nextentry -> preventry = del -> preventry;
             if (del -> preventry != NULL)
-                del -> preventry -> nextentry = del -> nextenrty;
+                del -> preventry -> nextentry = del -> nextentry;
             free(del);
             return;
         }
@@ -98,7 +100,7 @@ void BF_Remove(BFpage* node,bool_t remove){
 }
 bool_t BF_RemoveLRU(){
     BFpage* node = tail->preventry;
-    while(node->preventry!=NULL){
+    while(node != head){
         if(Unpinned(node)){
             BF_Remove(node,1);
             return true;
@@ -111,7 +113,8 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
     BFpage* node = BF_get_from_hash(bq);
     if(node == NULL){
 	    BFpage* tmp = (BFpage*)malloc(sizeof(BFpage));
-        node = BF_add_to_hash(bq,tmp);
+        BF_add_to_hash(bq,tmp);
+    	node = BF_get_from_hash(bq);
         if(BF_MAX_BUFS == BF_size){//need replacement with LRU
             if(BF_RemoveLRU() == false)//not found any unpinned BFpage
                 return -1;
@@ -119,12 +122,13 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
         BF_size = BF_size + 1;
         node->count = 1; node->dirty = false;
         node->unixfd = bq.unixfd; node->fd = bq.fd; 
-        node->pageNum = bq.pageNum; node->fpage = fpage;
+        node->pageNum = bq.pagenum;
     }
     else{
         BF_Remove(node,0);
         node->count = node->count + 1; 
-    }
+    } 
+	**fpage = node->fpage;
     //make the most recent used
     node->nextentry = head->nextentry;
     node->preventry = head;
@@ -137,7 +141,8 @@ int BF_AllocBuf(BFreq bq, PFpage **fpage) {
     if(node != NULL)//PF error code must be returned.
         return -1; 
     BFpage* tmp = (BFpage*)malloc(sizeof(BFpage));
-    node = BF_add_to_hash(bq,tmp);
+    BF_add_to_hash(bq,tmp);
+	node = BF_get_from_hash(bq);
     if(BF_MAX_BUFS == BF_size){//need replacement with LRU
         if(BF_RemoveLRU() == false)//not found unpinned page
             return -1;
@@ -145,7 +150,8 @@ int BF_AllocBuf(BFreq bq, PFpage **fpage) {
     BF_size = BF_size + 1;
     node->count = 1; node->dirty = false;
     node->unixfd = bq.unixfd; node->fd = bq.fd; 
-    node->pageNum = bq.pageNum; node->fpage = fpage;
+    node->pageNum = bq.pagenum; 
+	node->fpage = **fpage;
     //make the most recent used
     node->nextentry = head->nextentry;
     node->preventry = head;
@@ -173,27 +179,30 @@ int BF_TouchBuf(BFreq bq) {
 void FL_Add(BFpage* bpage){
     Free_List* node = (Free_List*)malloc(sizeof(Free_List));
     node->bpage = bpage;
-    node->nextentry = head_free->next;
-    head_free->next = node;
+    node->nextentry = head_free->nextentry;
+    head_free->nextentry = node;
 }
 int BF_FlushBuf(int fd) {
-    BFpage* node = head->nextentry, tmp;
+    BFpage* node = head->nextentry;
+    BFpage* tmp;
     while(node != tail){
         if(node->fd == fd){
             if(node->count > 0)//if it is pinned, then error value returned
                 return -1;
-            if(node->dirty)//if it dirty write to memeory
+            if(node->dirty)//if it is dirty write to memeory
                 FL_Add(node);
             tmp = node->nextentry;
             BF_Remove(node,1);
+            node = tmp;
         }
-        node = node->nextentry;
+        else
+       		node = node->nextentry;
     }
     return BFE_OK;
 }
 void BF_ShowBuf(void) {
     printf("The buffer pool content:\n");
-    printf("pageNum\tfd\tunixfd\tcount\tdirty\n")
+    printf("pageNum\tfd\tunixfd\tcount\tdirty\n");
     BFpage* node = head->nextentry;
     while(node != tail){
         printf("%d\t%d\t%d\t%d\t%d\n",node->pageNum,node->fd,node->unixfd,node->count,node->dirty); 
