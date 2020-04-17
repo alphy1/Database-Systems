@@ -128,7 +128,7 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
         BF_Remove(node,0);
         node->count = node->count + 1; 
     } 
-	**fpage = node->fpage;
+	*fpage = &node->fpage;
     //make the most recent used
     node->nextentry = head->nextentry;
     node->preventry = head;
@@ -151,7 +151,7 @@ int BF_AllocBuf(BFreq bq, PFpage **fpage) {
     node->count = 1; node->dirty = false;
     node->unixfd = bq.unixfd; node->fd = bq.fd; 
     node->pageNum = bq.pagenum; 
-	node->fpage = **fpage;
+	*fpage = &node->fpage;
     //make the most recent used
     node->nextentry = head->nextentry;
     node->preventry = head;
@@ -212,8 +212,8 @@ void BF_ShowBuf(void) {
 char Error_Names[BF_NERRORS][20]={"OK","No memory","No Buffer","Page Pinned","Page Unpinned","In the Buffer",
                                   "Not in the Buffer","Incomplete Write","Incomplete Read","Miss the Dirty",
                                   "Invalid Id","Message Error","Hash Not Found","Hash Page Exist"};
-void BF_PrintError (const char *errString) {
-    fprintf(stderr, "%s", errString);
-    fprintf(stderr, "%s", Error_Names[-BFerrno]);
+void BF_PrintError(const char *errString) {
+    fprintf(stderr, "%s\n", errString);
+    fprintf(stderr, "%s\n", Error_Names[-BFerrno]);
     //BFerrno needs to set in each of the BF layer functions
 }
