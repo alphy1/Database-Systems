@@ -7,6 +7,11 @@
 #include <stdlib.h>
 
 int BF_size; //Buffer size
+int BFerrno; //Most recent BF error code
+int SAVE_ERROR(int error){
+    BFerrno = error;
+    return error;
+}
 typedef struct BFpage {
   PFpage         fpage;       /* page data from the file                 */
   struct BFpage  *nextentry;   /* next in the linked list of buffer pages */
@@ -105,16 +110,21 @@ void BF_Remove(BFpage* node,bool_t remove){
         BF_remove_from_hash(node->fd,node->pageNum);
     }
 }
-void Write_To_Disk(BFpage* node){
-    //printf("DISK = %s\n",node->fpage.pagebuf);
-    write(node->unixfd, node->fpage.pagebuf, PAGE_SIZE);
+bool_t Write_To_Disk(BFpage* node){
+    if(write(node->unixfd, node->fpage.pagebuf, PAGE_SIZE) != PAGE_SIZE)
+        return false;
+    return true;
 }
 bool_t BF_RemoveLRU(){
     BFpage* node = tail->preventry;
     while(node != head){
         if(node->count == 0){//If unpinned
-            if(node->dirty)//If dirty
-                Write_To_Disk(node);
+            if(node->dirty){//If dirty
+                if(!Write_To_Disk(node)){
+                    SAVE_ERROR(BFE_INCOMPLETEWRITE);
+                    return false;
+                }
+            }
             BF_Remove(node,1);
             return true;
         }
@@ -135,8 +145,7 @@ BFpage* Search_In_Free_List(int fd,int pageNum){
     NEW_NODE = true;
     Free_List *node = (Free_List*)malloc(sizeof(Free_List));
     node->fd = fd; node->pageNum = pageNum;
-    tmp->nextentry = node;
-    node->nextentry = NULL;
+    tmp->nextentry = node; node->nextentry = NULL;
     node->bpage = (BFpage*)malloc(sizeof(BFpage));
     return node->bpage;
 }
@@ -151,9 +160,9 @@ BFpage* New_BF_Node(BFreq bq){
     BF_size = BF_size + 1;
     node->count = 1; node->dirty = false;
     if(NEW_NODE){
-        node->unixfd = bq.unixfd; 
-        node->fd = bq.fd; 
+        node->unixfd = bq.unixfd; node->fd = bq.fd; 
         node->pageNum = bq.pagenum;
+        node->nextentry = node->preventry = NULL;
         memset(node->fpage.pagebuf,0,sizeof node->fpage.pagebuf);
     }
     return node;
@@ -168,8 +177,8 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
     BFpage* node = BF_get_from_hash(bq);
     if(node == NULL){
         node = New_BF_Node(bq);
-        if(node == NULL)//not found any unpinned BFpage
-            return -1;
+        if(node == NULL)
+            return SAVE_ERROR(BFE_NOBUF);
     }
     else{
         BF_Remove(node,0);//detach node from current list
@@ -181,28 +190,30 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
 }
 int BF_AllocBuf(BFreq bq, PFpage **fpage) {
     BFpage* node = BF_get_from_hash(bq);
-    if(node != NULL)//page found
-        return -1;
+    if(node != NULL)
+        return SAVE_ERROR(BFE_PAGEINBUF);
     node = New_BF_Node(bq);
-    if(node == NULL)//not found any unpinned BFpage
-        return -1;
+    if(node == NULL)
+        return SAVE_ERROR(BFE_NOBUF);
 	*fpage = &node->fpage;
     Make_Most_Recent(node);
     return BFE_OK;
 }
 int BF_UnpinBuf(BFreq bq) {
     BFpage* node = BF_get_from_hash(bq);
-    if(node == NULL)//page not found in buffer
-        return -1;
-    if(node->count == 0)//page not pinned
-        return -1;
+    if(node == NULL)
+        return SAVE_ERROR(BFE_PAGENOTINBUF);
+    if(node->count == 0)
+        return SAVE_ERROR(BFE_PAGEUNPINNED);
     node->count = node->count - 1;
     return BFE_OK;
 }
 int BF_TouchBuf(BFreq bq) {
     BFpage* node = BF_get_from_hash(bq);
-    if(node == NULL)//Error code must return, if page not found in buffer
-        return -1;
+    if(node == NULL)
+        return SAVE_ERROR(BFE_PAGENOTINBUF);
+    if(node->count == 0)
+        return SAVE_ERROR(BFE_PAGEUNPINNED);
     node->dirty = true;
     BF_Remove(node,0);
     Make_Most_Recent(node);
@@ -213,10 +224,12 @@ int BF_FlushBuf(int fd) {
     BFpage* tmp;
     while(node != head){
         if(node->fd == fd){
-            if(node->count > 0)//if it is pinned, then error value returned
-                return -1;
-            if(node->dirty)//if it is dirty write to memeory
-                Write_To_Disk(node);
+            if(node->count > 0)
+                return SAVE_ERROR(BFE_PAGEPINNED);
+            if(node->dirty){//if it is dirty write to memeory
+                if(!Write_To_Disk(node))
+                    return SAVE_ERROR(BFE_INCOMPLETEWRITE);
+            }
             tmp = node->preventry;
             BF_Remove(node,1);
             node = tmp;
@@ -227,7 +240,7 @@ int BF_FlushBuf(int fd) {
     return BFE_OK;
 }
 void BF_ShowBuf(void) {
-    printf("The buffer pool content:\n");
+    printf("\nThe buffer pool content:\n");
     if(head->nextentry == tail){
         puts("empty");puts("");
         return;
@@ -245,6 +258,5 @@ char Error_Names[BF_NERRORS][20]={"OK","No memory","No Buffer","Page Pinned","Pa
                                   "Invalid Id","Message Error","Hash Not Found","Hash Page Exist"};
 void BF_PrintError(const char *errString) {
     fprintf(stderr, "%s\n", errString);
-   // fprintf(stderr, "%s\n", Error_Names[-BFerrno]);
-    //BFerrno needs to set in each of the BF layer functions
+    fprintf(stderr, "%s\n", Error_Names[-BFerrno]);
 }
