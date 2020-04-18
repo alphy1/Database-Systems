@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-int BF_size, Free_List_Position; //Buffer size
+int BF_size; //Buffer size
 typedef struct BFpage {
   PFpage         fpage;       /* page data from the file                 */
   struct BFpage  *nextentry;   /* next in the linked list of buffer pages */
@@ -17,7 +17,7 @@ typedef struct BFpage {
   int            fd;          /* PF file descriptor of this page         */
   int            unixfd;      /* Unix file descriptor of this page       */
 } BFpage;
-BFpage *head,*tail,*Free_List[BF_MAX_BUFS];
+BFpage *head,*tail;
 
 typedef struct BFhash_entry {
   struct BFhash_entry *nextentry;     /* next hash table element or NULL */
@@ -27,6 +27,14 @@ typedef struct BFhash_entry {
   struct BFpage *bpage;               /* ptr to buffer holding this page */
 } BFhash_entry;
 BFhash_entry *hash_table[BF_HASH_TBL_SIZE];
+
+typedef struct Free_List {
+  struct Free_List *nextentry;     /* next hash table element or NULL */
+  int fd;                             /* file descriptor                 */
+  int pageNum;                        /* page number                     */
+  struct BFpage *bpage;               /* ptr to buffer holding this page */
+} Free_List;
+Free_List *head_free;
 
 BFhash_entry* BF_new_hash_node(BFreq bq, BFpage* bpage){
     BFhash_entry* newNode = (BFhash_entry*)malloc(sizeof(BFhash_entry));
@@ -47,7 +55,6 @@ void BF_add_to_hash(BFreq bq, BFpage* bpage) {
         newNode -> nextentry = hash_table[hash_value];
         hash_table[hash_value] = newNode;
     }
-    return;
 }
 BFpage* BF_get_from_hash(BFreq bq) {
     int hash_value = (bq.fd * 263 + bq.pagenum) % BF_HASH_TBL_SIZE;
@@ -57,6 +64,7 @@ BFpage* BF_get_from_hash(BFreq bq) {
             return head -> bpage;
         head = head -> nextentry;
     }
+    
     return NULL;
 }
 void BF_remove_from_hash(int fd,int pageNum) {
@@ -64,6 +72,8 @@ void BF_remove_from_hash(int fd,int pageNum) {
     BFhash_entry *del = hash_table[hash_value];
     while (del != NULL) {
         if (del -> fd == fd && del -> pageNum == pageNum) {
+            if(del->nextentry == NULL && del->preventry ==NULL)
+                hash_table[hash_value] = NULL;
             if (del -> nextentry != NULL)
                 del -> nextentry -> preventry = del -> preventry;
             if (del -> preventry != NULL)
@@ -73,16 +83,19 @@ void BF_remove_from_hash(int fd,int pageNum) {
         }
         del = del -> nextentry;
     }
-    return;
 }
 void BF_Init(void) {
-    BF_size = 0; Free_List_Position = 0;
+    BF_size = 0;
 	head = (BFpage*)malloc(sizeof(BFpage));
 	tail = (BFpage*)malloc(sizeof(BFpage));
 	head->nextentry = tail; head->preventry = NULL;
     tail->preventry = head; tail->nextentry = NULL;
-    for(int i = 0; i < BF_MAX_BUFS; i++)
-        Free_List[i] = (BFpage*)malloc(sizeof(BFpage));
+
+	head_free = (Free_List*)malloc(sizeof(Free_List));
+    head_free->nextentry = NULL;
+
+    for(int i=0;i<BF_HASH_TBL_SIZE;i++)
+        hash_table[i] = NULL;
 }
 void BF_Remove(BFpage* node,bool_t remove){
     node->preventry->nextentry = node->nextentry;
@@ -90,11 +103,10 @@ void BF_Remove(BFpage* node,bool_t remove){
     if(remove){
         BF_size = BF_size - 1;
         BF_remove_from_hash(node->fd,node->pageNum);
-        Free_List[--Free_List_Position] = node;
     }
 }
 void Write_To_Disk(BFpage* node){
-    printf("DISK = %s\n",node->fpage.pagebuf);
+    //printf("DISK = %s\n",node->fpage.pagebuf);
     write(node->unixfd, node->fpage.pagebuf, PAGE_SIZE);
 }
 bool_t BF_RemoveLRU(){
@@ -110,19 +122,40 @@ bool_t BF_RemoveLRU(){
     }
     return false;
 }
+bool_t NEW_NODE;
+BFpage* Search_In_Free_List(int fd,int pageNum){
+    Free_List *tmp = head_free;
+    while(tmp->nextentry != NULL){
+        tmp = tmp->nextentry;
+        if(tmp->fd == fd && tmp->pageNum == pageNum){
+            NEW_NODE = false;
+            return tmp->bpage;
+        }
+    }
+    NEW_NODE = true;
+    Free_List *node = (Free_List*)malloc(sizeof(Free_List));
+    node->fd = fd; node->pageNum = pageNum;
+    tmp->nextentry = node;
+    node->nextentry = NULL;
+    node->bpage = (BFpage*)malloc(sizeof(BFpage));
+    return node->bpage;
+}
 BFpage* New_BF_Node(BFreq bq){
     if(BF_MAX_BUFS == BF_size){//need replacement with LRU
         if(!BF_RemoveLRU())
             return NULL;
     }
-    BFpage* node = Free_List[Free_List_Position++];
+    BFpage* node = Search_In_Free_List(bq.fd,bq.pagenum);
     BF_add_to_hash(bq,node);
     node = BF_get_from_hash(bq);
     BF_size = BF_size + 1;
     node->count = 1; node->dirty = false;
-    node->unixfd = bq.unixfd; node->fd = bq.fd; 
-    node->pageNum = bq.pagenum;
-    memset(node->fpage.pagebuf,0,sizeof node->fpage.pagebuf);
+    if(NEW_NODE){
+        node->unixfd = bq.unixfd; 
+        node->fd = bq.fd; 
+        node->pageNum = bq.pagenum;
+        memset(node->fpage.pagebuf,0,sizeof node->fpage.pagebuf);
+    }
     return node;
 }
 void Make_Most_Recent(BFpage* node){
