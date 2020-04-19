@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "string.h"
+#include "stdio.h"
 
 typedef struct PFhdr_str {
     int    numpages;      /* number of pages in the file */
@@ -188,8 +190,9 @@ int  PF_UnpinPage(int fd, int pagenum, int dirty)
         return SAVE_ERROR(PFE_MSGERR);
     return PFE_OK;
 }
-
-void PF_PrintError(const char *s)
+char Error_Names[PF_NERRORS][20]={"OK","Invalid Page","Ftab Full","PFE_FD","End of File","File Opened","File Not Opened",
+                                ,"Header Read","Header Write","Page Free","No Users","Message Error"};
+void PF_PrintError(const char *errString)
 {
     fprintf(stderr, "%s\n", errString);
     fprintf(stderr, "%s\n", Error_Names[-PFerrno]);
