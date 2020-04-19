@@ -190,7 +190,7 @@ int  PF_UnpinPage(int fd, int pagenum, int dirty)
         return SAVE_ERROR(PFE_MSGERR);
     return PFE_OK;
 }
-char Error_Names[PF_NERRORS][20]={"OK","Invalid Page","Ftab Full","PFE_FD","End of File","File Opened","File Not Opened",
+char Error_Names[PF_NERRORS][20]={"OK","Invalid Page","Ftab Full","File Description Error","End of File","File Opened","File Not Opened",
                                 ,"Header Read","Header Write","Page Free","No Users","Message Error"};
 void PF_PrintError(const char *errString)
 {
