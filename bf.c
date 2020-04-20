@@ -1,13 +1,18 @@
 #include "bf.h"
 #include "minirel.h"
+
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 int BF_size; //Buffer size
 int BFerrno; //Most recent BF error code
+int marked[BF_MAX_BUFS];
 int SAVE_ERROR(int error){
     BFerrno = error;
     return error;
@@ -22,7 +27,7 @@ typedef struct BFpage {
   int            fd;          /* PF file descriptor of this page         */
   int            unixfd;      /* Unix file descriptor of this page       */
 } BFpage;
-BFpage *head,*tail;
+BFpage *head,*tail,*Free_List[BF_MAX_BUFS];
 
 typedef struct BFhash_entry {
   struct BFhash_entry *nextentry;     /* next hash table element or NULL */
@@ -32,14 +37,6 @@ typedef struct BFhash_entry {
   struct BFpage *bpage;               /* ptr to buffer holding this page */
 } BFhash_entry;
 BFhash_entry *hash_table[BF_HASH_TBL_SIZE];
-
-typedef struct Free_List {
-  struct Free_List *nextentry;     /* next hash table element or NULL */
-  int fd;                             /* file descriptor                 */
-  int pageNum;                        /* page number                     */
-  struct BFpage *bpage;               /* ptr to buffer holding this page */
-} Free_List;
-Free_List *head_free;
 
 BFhash_entry* BF_new_hash_node(BFreq bq, BFpage* bpage){
     BFhash_entry* newNode = (BFhash_entry*)malloc(sizeof(BFhash_entry));
@@ -91,36 +88,51 @@ void BF_remove_from_hash(int fd,int pageNum) {
 }
 void BF_Init(void) {
     BF_size = 0;
-	head = (BFpage*)malloc(sizeof(BFpage));
-	tail = (BFpage*)malloc(sizeof(BFpage));
-	head->nextentry = tail; head->preventry = NULL;
-    tail->preventry = head; tail->nextentry = NULL;
-
-	head_free = (Free_List*)malloc(sizeof(Free_List));
-    head_free->nextentry = NULL;
-
-    for(int i=0;i<BF_HASH_TBL_SIZE;i++)
+    head = tail = NULL;
+    for(int i = 0; i < BF_MAX_BUFS; i++){
+        Free_List[i] = (BFpage*)malloc(sizeof(BFpage));
+        marked[i] = 0;
+    }
+    for(int i = 0; i < BF_HASH_TBL_SIZE; i++)
         hash_table[i] = NULL;
 }
 void BF_Remove(BFpage* node,bool_t remove){
-    node->preventry->nextentry = node->nextentry;
-    node->nextentry->preventry = node->preventry;
+    if(node->preventry != NULL)
+        node->preventry->nextentry = node->nextentry;
+    else
+        head = node->nextentry;
+	
+    if(node->nextentry != NULL)
+        node->nextentry->preventry = node->preventry;
+    else
+        tail = node->preventry;
     if(remove){
-        BF_size = BF_size - 1;
+	    for(int i = 0; i < BF_MAX_BUFS; i++)
+            if(marked[i] && Free_List[i] == node){
+                marked[i] = 0;
+                break;
+            }
+        BF_size--;
+        if(!BF_size)
+            head = tail = NULL;
         BF_remove_from_hash(node->fd,node->pageNum);
     }
 }
-bool_t Write_To_Disk(BFpage* node){
+bool_t Write_To_Disk(BFpage* node,bool_t sync){
     if(write(node->unixfd, node->fpage.pagebuf, PAGE_SIZE) != PAGE_SIZE)
         return false;
+    if(sync){
+        if(fsync(node->unixfd))//If file flushed
+            return false;
+    }     
     return true;
 }
 bool_t BF_RemoveLRU(){
-    BFpage* node = tail->preventry;
-    while(node != head){
+    BFpage* node = tail;
+    while(node != NULL){
         if(node->count == 0){//If unpinned
             if(node->dirty){//If dirty
-                if(!Write_To_Disk(node)){
+                if(!Write_To_Disk(node,false)){
                     SAVE_ERROR(BFE_INCOMPLETEWRITE);
                     return false;
                 }
@@ -128,50 +140,41 @@ bool_t BF_RemoveLRU(){
             BF_Remove(node,1);
             return true;
         }
-        node=node->preventry;
+        node = node->preventry;
     }
     return false;
-}
-bool_t NEW_NODE;
-BFpage* Search_In_Free_List(int fd,int pageNum){
-    Free_List *tmp = head_free;
-    while(tmp->nextentry != NULL){
-        tmp = tmp->nextentry;
-        if(tmp->fd == fd && tmp->pageNum == pageNum){
-            NEW_NODE = false;
-            return tmp->bpage;
-        }
-    }
-    NEW_NODE = true;
-    Free_List *node = (Free_List*)malloc(sizeof(Free_List));
-    node->fd = fd; node->pageNum = pageNum;
-    tmp->nextentry = node; node->nextentry = NULL;
-    node->bpage = (BFpage*)malloc(sizeof(BFpage));
-    return node->bpage;
 }
 BFpage* New_BF_Node(BFreq bq){
     if(BF_MAX_BUFS == BF_size){//need replacement with LRU
         if(!BF_RemoveLRU())
             return NULL;
     }
-    BFpage* node = Search_In_Free_List(bq.fd,bq.pagenum);
+    BFpage* node; BF_size++;
+	for(int i = 0; i < BF_MAX_BUFS; i++)
+        if(!marked[i]){
+            node = Free_List[i];
+            marked[i] = 1;
+            break;
+        }
     BF_add_to_hash(bq,node);
     node = BF_get_from_hash(bq);
-    BF_size = BF_size + 1;
     node->count = 1; node->dirty = false;
-    if(NEW_NODE){
-        node->unixfd = bq.unixfd; node->fd = bq.fd; 
-        node->pageNum = bq.pagenum;
-        node->nextentry = node->preventry = NULL;
-        memset(node->fpage.pagebuf,0,sizeof node->fpage.pagebuf);
-    }
+    node->unixfd = bq.unixfd; node->fd = bq.fd; 
+    node->pageNum = bq.pagenum;
+    node->nextentry = node->preventry = NULL;
+    memset(node->fpage.pagebuf, 0 , sizeof node->fpage.pagebuf);
     return node;
 }
 void Make_Most_Recent(BFpage* node){
-    node->nextentry = head->nextentry;
-    node->preventry = head;
-    head->nextentry->preventry = node;
-    head->nextentry = node;
+    if(head == NULL)
+        head = tail = node;
+    else{
+        if(head != node){
+            head->preventry = node;
+            node->nextentry = head;
+            head = node;
+        }
+    }
 }
 int BF_GetBuf(BFreq bq, PFpage **fpage) {
     BFpage* node = BF_get_from_hash(bq);
@@ -179,12 +182,14 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
         node = New_BF_Node(bq);
         if(node == NULL)
             return SAVE_ERROR(BFE_NOBUF);
+        if(read(bq.unixfd,&node->fpage,sizeof(PFpage)) != PAGE_SIZE)//read data from file
+            return SAVE_ERROR(BFE_INCOMPLETEREAD);
     }
     else{
-        BF_Remove(node,0);//detach node from current list
+        BF_Remove(node,0); //detach node from current list
         node->count = node->count + 1; 
     } 
-	*fpage = &node->fpage;
+    *fpage = &node->fpage;
     Make_Most_Recent(node);
     return BFE_OK;
 }
@@ -195,7 +200,7 @@ int BF_AllocBuf(BFreq bq, PFpage **fpage) {
     node = New_BF_Node(bq);
     if(node == NULL)
         return SAVE_ERROR(BFE_NOBUF);
-	*fpage = &node->fpage;
+    *fpage = &node->fpage;
     Make_Most_Recent(node);
     return BFE_OK;
 }
@@ -220,14 +225,14 @@ int BF_TouchBuf(BFreq bq) {
     return BFE_OK;
 }
 int BF_FlushBuf(int fd) {
-    BFpage* node = tail->preventry;
+    BFpage* node = tail;
     BFpage* tmp;
-    while(node != head){
+    while(node != NULL){
         if(node->fd == fd){
             if(node->count > 0)
                 return SAVE_ERROR(BFE_PAGEPINNED);
             if(node->dirty){//if it is dirty write to memeory
-                if(!Write_To_Disk(node))
+                if(!Write_To_Disk(node,true))
                     return SAVE_ERROR(BFE_INCOMPLETEWRITE);
             }
             tmp = node->preventry;
@@ -235,19 +240,19 @@ int BF_FlushBuf(int fd) {
             node = tmp;
         }
         else
-       		node = node->preventry;
+       	    node = node->preventry;
     }
     return BFE_OK;
 }
 void BF_ShowBuf(void) {
     printf("\nThe buffer pool content:\n");
-    if(head->nextentry == tail){
+    if(head == NULL){
         puts("empty");puts("");
         return;
     }
     printf("pageNum\tfd\tunixfd\tcount\tdirty\n");
-    BFpage* node = head->nextentry;
-    while(node != tail){
+    BFpage* node = head;
+    while(node != NULL){
         printf("%d\t%d\t%d\t%d\t%d\n",node->pageNum,node->fd,node->unixfd,node->count,node->dirty); 
         node = node->nextentry;
     }
@@ -260,3 +265,4 @@ void BF_PrintError(const char *errString) {
     fprintf(stderr, "%s\n", errString);
     fprintf(stderr, "%s\n", Error_Names[-BFerrno]);
 }
+
