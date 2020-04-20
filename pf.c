@@ -84,8 +84,7 @@ int  PF_OpenFile(const char *filename)
     struct stat _stat;
     if(fstat(fd, &_stat) < 0) return SAVE_ERROR(PFE_FD);
 
-    PFftab_ele tab = {TRUE, _stat.st_ino, filename, fd, hdr, 0};
-     _PFftab[i] = tab;
+     _PFftab[i] = {TRUE, _stat.st_ino, filename, fd, hdr, 0};
 
     if(i == PF_FTAB_SIZE) return SAVE_ERROR(PFE_FTABFULL);
 
@@ -118,8 +117,10 @@ int  PF_AllocPage(int fd, int *pagenum, char **pagebuf)
 
     BFreq req = {fd, _PFftab[fd].unixfd, _PFftab[fd].hdr.numpages++, TRUE};
     _PFftab[fd].hdrchanged = 1;
-    if(BF_AllocBuf(req, &pagebuf) != BFE_OK) return SAVE_ERROR(PFE_MSGERR);
-
+    PFpage *fpage;
+    if(BF_AllocBuf(req, &fpage) != BFE_OK) return SAVE_ERROR(PFE_MSGERR);
+    *pagebuf = fpage->pagebuf;
+    
     return PFE_OK;
 }
 
@@ -133,8 +134,12 @@ int  PF_GetNextPage(int fd, int *pagenum, char **pagebuf)
 
     (*pagenum) += 1;
     BFreq req = {fd, _PFftab[fd].unixfd, (*pagenum), FALSE};
-    if (BF_GetBuf(req, &pagebuf) != BFE_OK)
-        return SAVE_ERROR(PFE_MSGERR);          // Is this correct error?
+    
+    PFpage *fpage;
+    if (BF_GetBuf(req, &fpage) != BFE_OK)
+        return SAVE_ERROR(PFE_MSGERR);          // Is this correct error?  -jun :I think so!!
+  
+    *pagebuf = fpage->pagebuf;
     return PFE_OK;
 }
 
@@ -160,7 +165,7 @@ int  PF_GetThisPage(int fd, int pagenum, char **pagebuf)
 
     BFreq req = {fd, _PFftab[fd].unixfd, pagenum, FALSE};
     if (BF_GetBuf(req, &pagebuf) != BFE_OK)
-        return SAVE_ERROR(PFE_MSGERR);          // Is this correct error?
+        return SAVE_ERROR(PFE_MSGERR);          // Is this correct error? -jun :I think so!!
     return PFE_OK;
 
 }
