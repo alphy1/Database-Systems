@@ -1,6 +1,6 @@
-#include "/mnt/c/users/user/desktop/minirel/h/minirel.h"
-#include "/mnt/c/users/user/desktop/minirel/h/bf.h"
-#include "/mnt/c/users/user/desktop/minirel/h/pf.h"
+#include "minirel.h"
+#include "bf.h"
+#include "pf.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
