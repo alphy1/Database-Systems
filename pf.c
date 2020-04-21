@@ -38,14 +38,14 @@ void PF_Init(void)
 int  PF_CreateFile(const char *filename)
 {
 
-    int fd = open(filename, O_CREAT|O_EXCL|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-    if(fd < 0) return SAVE_ERROR(PFE_FILENOTOPEN);
+    int unixfd = open(filename, O_CREAT|O_EXCL|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+    if(unixfd < 0) return SAVE_ERROR(PFE_FILENOTOPEN);
 
     PFhdr_str hdr = {0};
 
-    if(write(fd, (void *)&hdr, sizeof(PFhdr_str)) < 0) return SAVE_ERROR(PFE_HDRWRITE);
+    if(write(unixfd, (void *)&hdr, sizeof(PFhdr_str)) < 0) return SAVE_ERROR(PFE_HDRWRITE);
 
-    if(close(fd) < 0) return SAVE_ERROR(PFE_FD);
+    if(close(unixfd) < 0) return SAVE_ERROR(PFE_FD);
 
     return PFE_OK;
 }
@@ -72,19 +72,19 @@ int  PF_OpenFile(const char *filename)
 
     if(i == PF_FTAB_SIZE) return SAVE_ERROR(PFE_FTABFULL);
 
-    int fd = open(filename, O_RDWR|O_SYNC);
+    int unixfd = open(filename, O_RDWR|O_SYNC);
     if(fd < 0) return SAVE_ERROR(PFE_FILENOTOPEN);
 
 
     PFhdr_str hdr = {0};
-    ssize_t rnt = read(fd, &hdr, sizeof(PFhdr_str));
+    ssize_t rnt = read(unixfd, &hdr, sizeof(PFhdr_str));
     if(rnt == 0) return SAVE_ERROR(PFE_EOF);
     else if(rnt != sizeof(PFhdr_str)) return SAVE_ERROR(PFE_HDRREAD);
 
     struct stat _stat;
-    if(fstat(fd, &_stat) < 0) return SAVE_ERROR(PFE_FD);
+    if(fstat(unixfd, &_stat) < 0) return SAVE_ERROR(PFE_FD);
 
-     _PFftab[i] = {TRUE, _stat.st_ino, filename, fd, hdr, 0};
+     _PFftab[i] = {TRUE, _stat.st_ino, filename, unixfd, hdr, 0};
 
     if(i == PF_FTAB_SIZE) return SAVE_ERROR(PFE_FTABFULL);
 
@@ -96,16 +96,17 @@ int  PF_CloseFile(int fd)
 {
     if(BF_FlushBuf(fd) != BFE_OK) return SAVE_ERROR(PFE_PAGEFREE);
 
+    int unixfd = _PFftab[fd].unixfd;
     if(_PFftab[fd].hdrchanged != 0)
     {
-        if(lseek(fd, 0, SEEK_SET) < 0) return SAVE_ERROR(PFE_HDRWRITE);
-        if(write(fd, (void *)&_PFftab[fd].hdr, sizeof(PFhdr_str)) < 0) return SAVE_ERROR(PFE_HDRWRITE);
-        if(fsync(fd)) return SAVE_ERROR(PFE_HDRWRITE);
+        if(lseek(unixfd, 0, SEEK_SET) < 0) return SAVE_ERROR(PFE_HDRWRITE);
+        if(write(unixfd, (void *)&_PFftab[fd].hdr, sizeof(PFhdr_str)) < 0) return SAVE_ERROR(PFE_HDRWRITE);
+        if(fsync(unixfd)) return SAVE_ERROR(PFE_HDRWRITE);
     }
 
     _PFftab[fd].valid = FALSE;
 
-    if(close(fd) < 0) return SAVE_ERROR(PFE_FD);
+    if(close(unixfd) < 0) return SAVE_ERROR(PFE_FD);
 
     return PFE_OK;
 }
