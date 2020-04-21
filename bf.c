@@ -1,5 +1,5 @@
-#include "/mnt/c/users/user/desktop/minirel/h/bf.h"
-#include "/mnt/c/users/user/desktop/minirel/h/minirel.h"
+#include "minirel.h"
+#include "bf.h"
 
 #include <unistd.h>
 #include <stdio.h>
