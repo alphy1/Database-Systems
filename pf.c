@@ -1,6 +1,6 @@
-#include "minirel.h"
-#include "bf.h"
-#include "pf.h"
+#include "/mnt/c/users/user/desktop/minirel/h/minirel.h"
+#include "/mnt/c/users/user/desktop/minirel/h/bf.h"
+#include "/mnt/c/users/user/desktop/minirel/h/pf.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -64,11 +64,9 @@ int  PF_OpenFile(const char *filename){
             break;
     if(i == PF_FTAB_SIZE) 
         return PF_SAVE_ERROR(PFE_FTABFULL);
-
     int fd = open(filename, O_RDWR|O_SYNC);
     if(fd < 0) 
         return PF_SAVE_ERROR(PFE_FILENOTOPEN);
-
     PFhdr_str hdr = {0};
     ssize_t rnt = read(fd, &hdr, sizeof(PFhdr_str));
     if(rnt == 0) 
@@ -86,8 +84,10 @@ int  PF_OpenFile(const char *filename){
 int  PF_CloseFile(int fd){
     if(_PFftab[fd].valid == FALSE)
         return PF_SAVE_ERROR(PFE_FILENOTOPEN);
+
     if(BF_FlushBuf(fd) != BFE_OK) 
         return PF_SAVE_ERROR(PFE_PAGEFREE);
+
     if(_PFftab[fd].hdrchanged != 0){
         if(lseek(_PFftab[fd].unixfd, 0, SEEK_SET) < 0) 
             return PF_SAVE_ERROR(PFE_HDRWRITE);
