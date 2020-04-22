@@ -117,12 +117,10 @@ void BF_Remove(BFpage* node,bool_t remove){
         BF_remove_from_hash(node->fd,node->pageNum);
     }
 }
-bool_t Write_To_Disk(BFpage* node,bool_t sync){
-    if(lseek(node->unixfd, 0, SEEK_END) < 0) 
+bool_t Write_To_Disk(BFpage* node){
+    if(lseek(node->unixfd, (node->pageNum+1)*PAGE_SIZE, SEEK_SET) < 0) 
         return false;
     if(write(node->unixfd, node->fpage.pagebuf, PAGE_SIZE) != PAGE_SIZE)
-        return false;
-    if(fsync(node->unixfd))//If file flushed
         return false;
     return true;
 }
@@ -131,7 +129,7 @@ bool_t BF_RemoveLRU(){
     while(node != NULL){
         if(node->count == 0){//If unpinned
             if(node->dirty){//If dirty
-                if(!Write_To_Disk(node,false)){
+                if(!Write_To_Disk(node)){
                     BF_SAVE_ERROR(BFE_INCOMPLETEWRITE);
                     return false;
                 }
@@ -181,6 +179,8 @@ int BF_GetBuf(BFreq bq, PFpage **fpage) {
         node = New_BF_Node(bq);
         if(node == NULL)
             return BF_SAVE_ERROR(BFE_NOBUF);
+        if(lseek(node->unixfd, (node->pageNum+1)*PAGE_SIZE, SEEK_SET) < 0) 
+            return BF_SAVE_ERROR(BFE_INCOMPLETEREAD);
         if(read(bq.unixfd,&node->fpage,sizeof(PFpage)) != PAGE_SIZE)
             return BF_SAVE_ERROR(BFE_INCOMPLETEREAD);
     }
@@ -210,6 +210,8 @@ int BF_UnpinBuf(BFreq bq) {
     if(node->count == 0)
         return BF_SAVE_ERROR(BFE_PAGEUNPINNED);
     node->count = node->count - 1;
+    if(bq.dirty == true)
+	    node->dirty = true;
     return BFE_OK;
 }
 int BF_TouchBuf(BFreq bq) {
@@ -231,7 +233,7 @@ int BF_FlushBuf(int fd) {
             if(node->count > 0)
                 return BF_SAVE_ERROR(BFE_PAGEPINNED);
             if(node->dirty){//if it is dirty write to memeory
-                if(!Write_To_Disk(node,true))
+                if(!Write_To_Disk(node))
                     return BF_SAVE_ERROR(BFE_INCOMPLETEWRITE);
             }
             tmp = node->preventry;
