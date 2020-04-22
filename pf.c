@@ -123,7 +123,8 @@ int  PF_GetNextPage(int fd, int *pagenum, char **pagebuf){
         return PF_SAVE_ERROR(PFE_FD);
     if ((*pagenum) + 1 >= _PFftab[fd].hdr.numpages)
         return PF_SAVE_ERROR(PFE_EOF);
-
+    if((*pagenum)<-1)
+        return PF_SAVE_ERROR(PFE_FD);
     (*pagenum) += 1;
     BFreq req = {fd, _PFftab[fd].unixfd, (*pagenum), FALSE};
     
