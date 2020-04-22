@@ -43,7 +43,8 @@ int  PF_CreateFile(const char *filename){
 
     if(close(fd) < 0) 
         return PF_SAVE_ERROR(PFE_FD);
-
+    if(fsync(fd))
+        return PF_SAVE_ERROR(PFE_FD);
     return PFE_OK;
 }
 int  PF_DestroyFile(const char *filename){
@@ -53,7 +54,7 @@ int  PF_DestroyFile(const char *filename){
             return PF_SAVE_ERROR(PFE_FILEOPEN);
 
     if(unlink(filename) == 0) 
-        return PF_SAVE_ERROR(PFE_MSGERR);
+        return PF_SAVE_ERROR(PFE_FILEOPEN);
         
     return PFE_OK;
 }
@@ -68,6 +69,8 @@ int  PF_OpenFile(const char *filename){
     if(fd < 0) 
         return PF_SAVE_ERROR(PFE_FILENOTOPEN);
     PFhdr_str hdr = {0};
+    if(lseek(fd, 0, SEEK_SET) < 0) 
+        return PF_SAVE_ERROR(PFE_HDRREAD);
     ssize_t rnt = read(fd, &hdr, sizeof(PFhdr_str));
     if(rnt == 0) 
         return PF_SAVE_ERROR(PFE_EOF);
@@ -92,8 +95,6 @@ int  PF_CloseFile(int fd){
         if(lseek(_PFftab[fd].unixfd, 0, SEEK_SET) < 0) 
             return PF_SAVE_ERROR(PFE_HDRWRITE);
         if(write(_PFftab[fd].unixfd, (void *)&_PFftab[fd].hdr, sizeof(PFhdr_str)) < 0) 
-            return PF_SAVE_ERROR(PFE_HDRWRITE);
-        if(fsync(_PFftab[fd].unixfd)) 
             return PF_SAVE_ERROR(PFE_HDRWRITE);
     }
     _PFftab[fd].valid = FALSE;
@@ -141,10 +142,8 @@ int  PF_GetFirstPage(int fd, int *pagenum, char **pagebuf){
         return PF_SAVE_ERROR(PFE_EOF);
 
     (*pagenum) = -1;
-    if (PF_GetNextPage(fd, pagenum, pagebuf) != PFE_OK)
-        return PF_SAVE_ERROR(PFE_MSGERR);
-
-    return PFE_OK;
+	
+    return PF_GetNextPage(fd, pagenum, pagebuf);
 }
 int  PF_GetThisPage(int fd, int pagenum, char **pagebuf){
     if (fd < 0 || fd >= PF_FTAB_SIZE)
@@ -188,7 +187,7 @@ int  PF_UnpinPage(int fd, int pagenum, int dirty){
     return PFE_OK;
 }
 char PF_Error_Names[PF_NERRORS][30]={"OK","Invalid Page","Ftab Full","File Description Error","End of File","File Opened","File Not Opened",
-                                "Header Read Error","Header Write Error","Page Free Error","No Users","Message Error"};
+                                "Header Read Error","Header Write Error","Page Free Error","No Users","Message Error[BF layer Error]"};
 void PF_PrintError(const char *errString){
     fprintf(stderr, "%s\n", errString);
     fprintf(stderr, "%s\n", PF_Error_Names[-PFerrno]);
