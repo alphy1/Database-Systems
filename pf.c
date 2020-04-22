@@ -23,7 +23,7 @@ typedef struct PFftab_ele {
 } PFftab_ele;
 
 PFftab_ele _PFftab[PF_FTAB_SIZE] = {0};
-int PFerrno; //Most recent PF error code
+int PFerrno; /*Most recent PF error code*/
 
 int PF_SAVE_ERROR(int error){
     PFerrno = error;
@@ -34,7 +34,7 @@ void PF_Init(void){
 }
 int  PF_CreateFile(const char *filename){
     int unixfd = open(filename, O_CREAT|O_EXCL|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-    if(fd < 0) 
+    if(unixfd < 0) 
         return PF_SAVE_ERROR(PFE_FILENOTOPEN);
 
     PFhdr_str hdr = {0};
@@ -80,7 +80,8 @@ int  PF_OpenFile(const char *filename){
     if(fstat(unixfd, &_stat) < 0) 
         return PF_SAVE_ERROR(PFE_FD);
 	
-    _PFftab[i] = {TRUE, _stat.st_ino, filename, unixfd, hdr, 0};
+    PFftab_ele tab = {TRUE, _stat.st_ino, filename, unixfd, hdr, 0};
+    _PFftab[i] = tab;
 
     return i;
 }
