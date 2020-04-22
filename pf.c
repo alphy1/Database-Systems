@@ -40,10 +40,9 @@ int  PF_CreateFile(const char *filename){
     PFhdr_str hdr = {0};
     if(write(fd, (void *)&hdr, sizeof(PFhdr_str)) < 0) 
         return PF_SAVE_ERROR(PFE_HDRWRITE);
-
-    if(close(fd) < 0) 
-        return PF_SAVE_ERROR(PFE_FD);
     if(fsync(fd))
+        return PF_SAVE_ERROR(PFE_FD);
+    if(close(fd) < 0) 
         return PF_SAVE_ERROR(PFE_FD);
     return PFE_OK;
 }
