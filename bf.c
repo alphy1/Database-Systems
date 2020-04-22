@@ -248,7 +248,7 @@ int BF_FlushBuf(int fd) {
 void BF_ShowBuf(void) {
     printf("\nThe buffer pool content:\n");
     if(head == NULL){
-        puts("empty");puts("");
+        puts("empty");
         return;
     }
     printf("pageNum\tfd\tunixfd\tcount\tdirty\n");
