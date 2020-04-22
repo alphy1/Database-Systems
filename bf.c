@@ -201,9 +201,10 @@ int BF_AllocBuf(BFreq bq, PFpage **fpage) {
         return BF_SAVE_ERROR(BFE_NOBUF);
 	
     if(bq.dirty == true)
-	    node->dirty = true;
+	node->dirty = true;
 	
-	*fpage = &node->fpage;
+    *fpage = &node->fpage;
+	
     Make_Most_Recent(node);
     return BFE_OK;
 }
