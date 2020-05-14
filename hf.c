@@ -10,6 +10,10 @@
 #include "stdio.h"
 
 int HFerrno; /*Most recent HF error code*/
+int HF_SAVE_ERROR(int error){
+    HFerrno = error;
+    return error;
+}
 typedef struct {
     int RecSize;                 /* Record size */
     int RecPage;                 /* Number of records per page */
@@ -17,10 +21,6 @@ typedef struct {
     int NumFrPgFile;             /* Number of free pages in the file */
 } HFHeader;
 HFHeader HFtab[HF_FTAB_SIZE]; //HF_FTAB_SIZE = MAX_OPEN_FILES = PF_FTAB_SIZE
-int HF_SAVE_ERROR(int error){
-    HFerrno = error;
-    return error;
-}
 //--------------------------------BITMAP------------------------------------
 bool_t isFalse(char *pagebuf,int id){
     return !(int(pagebuf[j/8])>>(j%8)&1);
@@ -37,10 +37,10 @@ void set_False(char *pagebuf,int id){
     pagebuf[id/8] -= (1<<(id%8));
 }
 int start_pos(int fileDesc,int id){
-    return id*HFtab[fileDesc].recSize+HFtab[fileDesc].recPage/8+1;
+    return id*HFtab[fileDesc].recSize + HFtab[fileDesc].recPage/8 + 1;
 }
 //--------------------------------------------------------------------------
-int M(int RecSize){
+int M(int RecSize){//find the biggest M(number of record) that can fit to PAGE_SIZE
     for(int i = PAGE_SIZE; i >= 1; i--)
         if(i*RecSize + (i+7)/8 <= PAGE_SIZE)    
             return i;
@@ -61,10 +61,14 @@ int HF_DestroyFile(const char *fileName);
 int HF_OpenFile(const char *fileName);
 int	HF_CloseFile(int fileDesc);
 int Search_Record(char *pagebuf,int M){
-    for(int j=0;j<M;j++)
+    for(int j= 0 ; j < M; j++)
         if(isFalse(pagebuf,j))
             return j;
     return -1;
+}
+void copy_the_record(char *record,char *pagebuf,int st){
+    for(int i=st,j=0;j < PAGE_SIZE;i++,j++)
+        record[i] = pagebuf[j];
 }
 void Insert_Record(char *pagebuf,char *record,int id,int st){
     set_True(pagebuf,id);
@@ -83,16 +87,16 @@ RECID HF_InsertRec(int fileDesc, char *record){
         return recid;
      }
     char *buf;
-    if(HFtab[fileDesc].NumFrPgFile > 0){
-        for(int i = 0; i < HFtab[fileDesc].NumPg; i++){
+    if(HFtab[fileDesc].NumFrPgFile > 0){//If there is any free page
+        for(int i = 0; i < HFtab[fileDesc].NumPg; i++){//Search some free place for new record
             PF_GetThisPage(fileDesc,i,&buf);
-            if((recid.recnum = Search_Record(buf,HFtab[fileDesc].RecPage)) != -1){
+            if((recid.recnum = Search_Record(buf,HFtab[fileDesc].RecPage)) != -1){//Found empty record place for new record
                 recid.pagenum = i;
                 break;
             }
         }
     }
-    else{
+    else{//We have to create new page
         HFtab[fileDesc].NumFrPgFile++;
         PF_AllocPage(fileDesc,&HFtab[fileDesc].NumPg,&buf);
         recid.pagenum = HFtab[fileDesc].NumPg-1;
@@ -107,7 +111,7 @@ int HF_DeleteRec(int fileDesc, RECID recId){
         return HF_SAVE_ERROR(HFE_INVALIDRECORD);
     char *buf;
     PF_GetThisPage(fileDesc,recId.pagenum,&buf);
-    if(Search_Record(buf,HFtab[fileDesc].RecPage) == -1)
+    if(Search_Record(buf,HFtab[fileDesc].RecPage) == -1)//If page was full, now after deleting there will be place for some record
         HFtab[fileDesc].NumFrPgFile++;
     if(isFalse(buf,recId.recnum))//recId not exist
         return HFE_EOF;
@@ -116,17 +120,12 @@ int HF_DeleteRec(int fileDesc, RECID recId){
 }
 RECID HF_GetFirstRec(int fileDesc, char *record){
     RECID recid = {0,0};
-    if(HFtab[fileDesc].NumFrPgFile == 0){
-        HF_SAVE_ERROR(HFE_EOF);
-        return recid;
-    }
     char *buf;
     for(int i = 0; i < HFtab[fileDesc].NumPg; i++){
         PF_GetThisPage(fileDesc,i,&buf);
         if((recid.recnum = Search_Record(buf,HFtab[fileDesc].RecPage)) != -1){
             recid.pagenum = i;
-            for(int j=0,st=start_pos(fileDesc,recid.recnum);j<PAGE_SIZE;j++,st++)
-                record[j] = buf[st];
+            copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
             break;
         }
     }
@@ -140,51 +139,52 @@ RECID HF_GetNextRec(int fileDesc, RECID recId, char *record){
     }
     char *buf;
     PF_GetThisPage(fileDesc,recId.pagenum,&buf);
-    for(int j = recId.recnum+1; j < HFtab[fileDesc].RecPage; j++)
+    for(int j = recId.recnum+1; j < HFtab[fileDesc].RecPage; j++)//search in suffix of current page
         if(isTrue(buf,j)){
-            recid.pagenum = i;
+            recid.pagenum = recId.pagenum;
             recid.recnum = j;
+            copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
             return recid; 
         }
-    for(int i = recId.pagenum+1; i < HFtab[fileDesc].NumPg; i++){
+    for(int i = recId.pagenum+1; i < HFtab[fileDesc].NumPg; i++){//search in suffix pages of file
         PF_GetThisPage(fileDesc,i,&buf);
         for(int j = 0; j < HFtab[fileDesc].RecPage; j++)
             if(isTrue(buf,j)){
                 recid.pagenum = i;
                 recid.recnum = j;
+                copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
                 return recid; 
             }
     }
-    for(int i = 0; i < recId.pagenum; i++){
+    for(int i = 0; i < recId.pagenum; i++){//search in prefix pages of file
         PF_GetThisPage(fileDesc,i,&buf);
         for(int j = 0; j < HFtab[fileDesc].RecPage; j++)
             if(isTrue(buf,j)){
                 recid.pagenum = i;
                 recid.recnum = j;
+                copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
                 return recid; 
             }
     }
-    PF_GetThisPage(fileDesc,recId.pagenum,&buf);
+    PF_GetThisPage(fileDesc,recId.pagenum,&buf);//search in prefix of current page
     for(int j = 0; j < recId.recnum; j++)
         if(isTrue(buf,j)){
-            recid.pagenum = i;
+            recid.pagenum = recId.pagenum;
             recid.recnum = j;
+            copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
             return recid; 
         }
-    HF_SAVE_ERROR(HFE_EOF);
-    return recid;//not found any record other than recId
+    HF_SAVE_ERROR(HFE_EOF);//not found any record other than recId
+    return recid;
 }
 int	HF_GetThisRec(int fileDesc, RECID recId, char *record){
     if(!HF_ValidRecId(fileDesc,recId))
         return HF_SAVE_ERROR(HFE_INVALIDRECORD);
-    if(HFtab[fileDesc].NumFrPgFile == 0)
-        return HF_SAVE_ERROR(HFE_EOF);
     char *buf;
     PF_GetThisPage(fileDesc,i,&buf);
     if(isFalse(buf,recId.recnum))//recId not exist
         return HF_SAVE_ERROR(HFE_EOF);
-    for(int j=0,st=start_pos(fileDesc,recId.recnum);j<PAGE_SIZE;j++,st++)
-        record[j] = buf[st];
+    copy_the_record(record,buf,start_pos(fileDesc,recId.recnum));
     return HF_SAVE_ERROR(HFE_OK);
 }
 int HF_OpenFileScan(int fileDesc, char attrType, int attrLength, 
