@@ -214,7 +214,7 @@ int HF_DeleteRec(int fileDesc, RECID recId){
     Delete_Record(buf,recId.recnum,start_pos(fileDesc,recId.recnum),HFtab[fileDesc].RecSize);
     PF_DirtyPage(fileDesc,recId.pagenum);
     PF_UnpinPage(fileDesc,recId.pagenum,FALSE);
-    return HF_SAVE_ERROR(HFE_OK);
+    return HFE_OK;
 }
 RECID HF_GetFirstRec(int fileDesc, char *record){
     RECID recid = {-1,-1};
