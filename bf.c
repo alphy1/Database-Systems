@@ -167,6 +167,7 @@ void Make_Most_Recent(BFpage* node){
         head = tail = node;
     else{
         if(head != node){
+            node->preventry = NULL;
             head->preventry = node;
             node->nextentry = head;
             head = node;
