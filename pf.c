@@ -52,7 +52,7 @@ int  PF_DestroyFile(const char *filename){
         if(_PFftab[i].valid == TRUE && strcmp(_PFftab[i].fname, filename) == 0)
             return PF_SAVE_ERROR(PFE_FILEOPEN);
 
-    if(unlink(filename) == 0) 
+    if(unlink(filename) != 0) 
         return PF_SAVE_ERROR(PFE_FILEOPEN);
         
     return PFE_OK;
