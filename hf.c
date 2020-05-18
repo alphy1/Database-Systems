@@ -82,6 +82,7 @@ int HF_CreateFile(const char *fileName, int RecSize){
 
     HFHeader hdr = {RecSize,M(RecSize),0,0};
     HFtab[fileDesc] = hdr; 
+
     int unixfd = open(fileName, O_RDWR|O_SYNC);
     if(unixfd < 0) 
         return HF_SAVE_ERROR(HFE_FILENOTOPEN);
@@ -97,6 +98,7 @@ int HF_CreateFile(const char *fileName, int RecSize){
 int HF_DestroyFile(const char *fileName){
     if(PF_DestroyFile(fileName) != 0)
         return HF_SAVE_ERROR(HFE_PF);
+
     return HFE_OK;
 }
 int HF_OpenFile(const char *fileName){
@@ -108,6 +110,7 @@ int HF_OpenFile(const char *fileName){
     Scan_Table[fileDesc].opened = TRUE;
     Scan_Table[fileDesc].fname = fileName;
     HFHeader hdr = {0};
+
     int unixfd = open(fileName, O_RDWR|O_SYNC);
     if(unixfd < 0) 
         return HF_SAVE_ERROR(HFE_FILENOTOPEN);
@@ -118,13 +121,17 @@ int HF_OpenFile(const char *fileName){
         return HF_SAVE_ERROR(HFE_EOF);
     if(close(unixfd) < 0) 
         return HF_SAVE_ERROR(HFE_INTERNAL);
+
     HFtab[fileDesc] = hdr; 
+
     return fileDesc;
 }
-int	HF_CloseFile(int fileDesc){
+int HF_CloseFile(int fileDesc){
     if(Scan_Table[fileDesc].scanned)
         return HF_SAVE_ERROR(HFE_SCANOPEN);
+
     Scan_Table[fileDesc].opened = FALSE;
+
     int unixfd = open(Scan_Table[fileDesc].fname, O_RDWR|O_SYNC);
     if(unixfd < 0) 
         return HF_SAVE_ERROR(HFE_FILENOTOPEN);
@@ -134,10 +141,13 @@ int	HF_CloseFile(int fileDesc){
         return HF_SAVE_ERROR(HFE_EOF);
     if(close(unixfd) < 0) 
         return HF_SAVE_ERROR(HFE_INTERNAL);
+        
     if(PF_CloseFile(fileDesc) < 0)
         return HF_SAVE_ERROR(HFE_PF); 
+
     return HFE_OK;
 }
+//------------------------BITMAP---------------------------
 int Search_False_Record(char *pagebuf,int M){
     for(int j = 0 ; j < M; j++)
         if(isFalse(pagebuf,j))
@@ -164,6 +174,7 @@ void Delete_Record(char *pagebuf,int id,int st,int record_size){
     for(int i = st, j = 0;j < record_size; i++,j++)
         pagebuf[i] = '0';
 }
+//--------------------------------------------------------
 RECID HF_InsertRec(int fileDesc, char *record){
     RECID recid = {-1,-1};
     if(fileDesc < 0 || fileDesc >= HF_FTAB_SIZE){
@@ -192,8 +203,10 @@ RECID HF_InsertRec(int fileDesc, char *record){
     Insert_Record(buf,record,recid.recnum,start_pos(fileDesc,recid.recnum),HFtab[fileDesc].RecSize);
     PF_DirtyPage(fileDesc,recid.pagenum);
     PF_UnpinPage(fileDesc,recid.pagenum,FALSE);
+
     if(Search_False_Record(buf,HFtab[fileDesc].RecPage) == -1)
         HFtab[fileDesc].NumFrPgFile--;
+
     return recid;
 }
 int HF_DeleteRec(int fileDesc, RECID recId){
@@ -201,6 +214,7 @@ int HF_DeleteRec(int fileDesc, RECID recId){
         return HF_SAVE_ERROR(HFE_FD);
      if(!HF_ValidRecId(fileDesc,recId))
         return HF_SAVE_ERROR(HFE_INVALIDRECORD);
+
     char *buf;
     PF_GetThisPage(fileDesc,recId.pagenum,&buf);
     if(isFalse(buf,recId.recnum))//recId not exist
@@ -211,10 +225,12 @@ int HF_DeleteRec(int fileDesc, RECID recId){
     */
     if(Search_False_Record(buf,HFtab[fileDesc].RecPage) == -1)
         HFtab[fileDesc].NumFrPgFile++;
+
     Delete_Record(buf,recId.recnum,start_pos(fileDesc,recId.recnum),HFtab[fileDesc].RecSize);
     PF_DirtyPage(fileDesc,recId.pagenum);
     PF_UnpinPage(fileDesc,recId.pagenum,FALSE);
-    return HFE_OK;
+
+    return HF_SAVE_ERROR(HFE_OK);
 }
 RECID HF_GetFirstRec(int fileDesc, char *record){
     RECID recid = {-1,-1};
@@ -274,11 +290,14 @@ int	HF_GetThisRec(int fileDesc, RECID recId, char *record){
         return HF_SAVE_ERROR(HFE_FD);
     if(!HF_ValidRecId(fileDesc,recId))
         return HF_SAVE_ERROR(HFE_INVALIDRECORD);
+
     char *buf;
     PF_GetThisPage(fileDesc,recId.pagenum,&buf);
     PF_UnpinPage(fileDesc,recId.pagenum,FALSE);
+    
     if(isFalse(buf,recId.recnum))//recId not exist
         return HF_SAVE_ERROR(HFE_EOF);
+
     Copy_Record(record,buf,start_pos(fileDesc,recId.recnum),HFtab[fileDesc].RecSize);
     return HFE_OK;
 }
@@ -291,14 +310,17 @@ int HF_OpenFileScan(int fileDesc, char attrType, int attrLength, int attrOffset,
         return HF_SAVE_ERROR(HFE_ATTROFFSET);
     if(Scan_Table[fileDesc].opened == FALSE)
         return HF_SAVE_ERROR(HFE_FILENOTOPEN);
+
     Scan_Table[fileDesc].value.op = op;
     Scan_Table[fileDesc].value.attrType = attrType;
     Scan_Table[fileDesc].value.attrLength = attrLength;
     Scan_Table[fileDesc].value.attrOffset = attrOffset;
+
     if(value == NULL)
         Scan_Table[fileDesc].value.any = TRUE;
     else
         Scan_Table[fileDesc].value.any = FALSE;
+
     if(attrType == INT_TYPE){
         if(attrLength != 4)
             return HF_SAVE_ERROR(HFE_ATTRLENGTH);
@@ -321,11 +343,18 @@ int HF_OpenFileScan(int fileDesc, char attrType, int attrLength, int attrOffset,
     }
     else
         return HF_SAVE_ERROR(HFE_ATTRTYPE);
+
     Scan_Table[fileDesc].scanned = TRUE;
     Scan_Table[fileDesc].LR.recnum = -1;
+
     return fileDesc;
 }
-int comp(char *a, char *b,int len){
+int comp(char *a, char *b,int len){//Comparing two strings in given fixed length
+    /*
+        if a < b return 0
+        if a > b return 1
+        if a == b return 2
+    */
     for(int i = 0; i < len; i++){
         if(a[i] < b[i])
             return 0;
@@ -335,7 +364,7 @@ int comp(char *a, char *b,int len){
     return 2;
 }
 bool_t Satisfy(Rec_Scan V,char *record){
-    if(V.any || V.op == 7)
+    if(V.any || V.op == 7)//If value NULL or op code is ALL_OP
         return TRUE;
     if(V.attrType == INT_TYPE){
         int attribute = *((int*)(&record[V.attrOffset]));
@@ -382,8 +411,9 @@ bool_t Satisfy(Rec_Scan V,char *record){
         if(V.op == 6)
             return (code == 1 || code == 0);
     }
+    return FALSE;
 }
-RECID HF_FindNextRec(int scanDesc, char *record){ //scanDesc = fileDesc
+RECID HF_FindNextRec(int scanDesc, char *record){ //We consider scanDesc = fileDesc
     RECID recid = {-1,-1};
     if(scanDesc < 0 || scanDesc >= MAXSCANS){
         HF_SAVE_ERROR(HFE_SD);
@@ -408,6 +438,7 @@ RECID HF_FindNextRec(int scanDesc, char *record){ //scanDesc = fileDesc
 int	HF_CloseFileScan(int scanDesc){
     if(scanDesc < 0 || scanDesc >= MAXSCANS)
         return HF_SAVE_ERROR(HFE_SD);
+
     Scan_Table[scanDesc].scanned = FALSE;
     return HFE_OK;
 }
@@ -419,9 +450,11 @@ char HF_Error_Names[HF_NERRORS][100]={"HF routine successful","error in PF layer
     "# scans open exceeds MAXSCANS","invalid file descriptor","invalid scan descriptor","invalid record id","end of file",
     "record size invalid","File is open in file table","Scan Open for the given file","File not open in file table",
     "Scan not open in scan table","Invalid attribute type in file scan","Invalid attribute length","Invalid attribute offset",
-    "Invalid Operator in file scan","File not a MINIREL file","(possibly corrupt file)","page number  > MAXPGNUMBER",
+    "Invalid Operator in file scan","File not a MINIREL file","(possibly corrupt file)","page number > MAXPGNUMBER",
     "meaningful only when STATS_XXX macros are in use"};
+
 void HF_PrintError(const char *errString){
     fprintf(stderr, "%s\n", errString);
     fprintf(stderr, "%s\n", HF_Error_Names[-HFerrno]);
 }
+
