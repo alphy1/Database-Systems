@@ -154,13 +154,13 @@ int leafSplit(int fd, B_node *root, B_node *leaf, char *key, RECID recId) {
     printf("\n");
     */
     for (int i = 0; i < order; ++i)
-        free(temp_keys[i]);
+        free(temp_keys[i]);   
     if (insert_into_parent(fd, root, leaf, new_leaf, get_key(fd, new_leaf->id, 0)) == 0) return 0;
 	return 1;
 }
 
 int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key, B_node *right) {
-	char *temp_keys[order + 1];
+    char *temp_keys[order + 1];
 	for (int i = 0; i < order; ++i)
         temp_keys[i] = (char *) malloc(header[fd].length * sizeof(char));
 	RECID temp_children[order + 3];
@@ -170,6 +170,7 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
             j++;
 		temp_children[j] = old_node->children[i];
 	}
+	
 	for (int i = 0, j = 0; i < old_node->num_keys; i++, j++) {
 		if (j == left_index)
             j++;
@@ -189,10 +190,14 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
 		memcpy(get_key(fd, old_node->id, i), temp_keys[i], header[fd].length);
 	}
 	old_node->children[old_node->num_keys] = temp_children[old_node->num_keys];
-	printf("%d %d %d\n",old_node->id.pagenum, *(int *)key, old_node->num_keys);
+	/*printf("OLD NODE %d %d %d\n",old_node->id.pagenum, *(int *)key, old_node->num_keys);
     for (int i = 0; i <= old_node->num_keys + 1; ++i)
-        printf("%d %d\n", old_node->children[i].pagenum, *(int *)get_key(fd, old_node->id, i));
+        printf("%d ", old_node->children[i].pagenum);
     printf("\n");
+    for (int i = 0; i < old_node->num_keys; ++i)
+        printf("%d ", *(int *)get_key(fd, old_node->id, i));
+    printf("\n");
+    */
 	new_node->num_keys = order - old_node->num_keys - 1;
 	for (int i = old_node->num_keys + 1; i < order; i++) {
 		new_node->children[i - old_node->num_keys - 1] = temp_children[i];
@@ -205,10 +210,18 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
         if(child==NULL) return NULL;
 		child->parent = new_node->id;
 	}
-    char *k = temp_keys[old_node->num_keys];
+	/*printf("NEW NODE %d %d %d\n", new_node->id.pagenum, *(int *)key, new_node->num_keys);
+    for (int i = 0; i <= new_node->num_keys + 1; ++i)
+        printf("%d ", new_node->children[i].pagenum);
+    printf("\n");
+    for (int i = 0; i < new_node->num_keys; ++i)
+        printf("%d ", *(int *)get_key(fd, new_node->id, i));
+    printf("\n");
+*/
+    char *k = (char *) malloc(header[fd].length * sizeof(char));
+    memcpy(k, temp_keys[old_node->num_keys], header[fd].length);
     for (int i = 0; i < order; ++i)
         free(temp_keys[i]);
-
     if (insert_into_parent(fd, root, old_node, new_node, k) == 0) return 0;
     return 1;
 }
@@ -224,7 +237,7 @@ int insert_into_parent(int fd, B_node *root, B_node *left, B_node *right, char *
         new_root->parent.recnum = -1;
         left->parent = new_root->id;
         right->parent = new_root->id;
-        //printf("ROOT %d\n", new_root->id);
+        //printf("ROOT %d %d %d\n", new_root->id.pagenum, *(int *)get_key(fd, new_root->id, 0), *(int *)key);
         rootarry[fd] = new_root->id;
         return 1;
 	}
@@ -371,6 +384,13 @@ void find_less(int fd, B_node *root, char *key, entry *first, entry *last) {
             (*last).index = i;
             break;
 		}
+	if ((*last).index == -1) 
+	    if (leaf->children[leaf->num_keys + 1].pagenum != -1) {
+            B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
+            (*last).index = 0;
+            (*last).nodeId = t->id;
+        } else 
+            (*last).index = leaf->num_keys;
     return;
 }
 
@@ -401,11 +421,13 @@ void find_greater(int fd, B_node *root, char *key, entry *first, entry *last) {
             break;
 		}
     }
-    if ((*first).index == -1 && leaf->children[leaf->num_keys + 1].pagenum != -1) {
-        B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
-        (*first).index = 0;
-        (*first).nodeId = t->id;
-    }
+    if ((*first).index == -1) 
+	    if (leaf->children[leaf->num_keys + 1].pagenum != -1) {
+            B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
+            (*first).index = 0;
+            (*first).nodeId = t->id;
+        } else 
+            (*first).index = leaf->num_keys;
     return;
 }
 
@@ -424,11 +446,14 @@ void find_lequal(int fd, B_node *root, char *key, entry *first, entry *last) {
             break;
 		}
 		
-	if ((*last).index == -1 && leaf->children[leaf->num_keys + 1].pagenum != -1) {
-        B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
-        (*last).index = 0;
-        (*last).nodeId = t->id;
-    }	
+	if ((*last).index == -1) 
+	    if (leaf->children[leaf->num_keys + 1].pagenum != -1) {
+            B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
+            (*last).index = 0;
+            (*last).nodeId = t->id;
+        } else 
+            (*last).index = leaf->num_keys;
+	
     return;
 }
 
@@ -447,144 +472,79 @@ void find_gequal(int fd, B_node *root, char *key, entry *first, entry *last) {
             (*first).index = i;
             break;
 		}
-
+    if ((*first).index == -1) 
+	    if (leaf->children[leaf->num_keys + 1].pagenum != -1) {
+            B_node *t = get_Bnode(fd, leaf->children[leaf->num_keys + 1]);
+            (*first).index = 0;
+            (*first).nodeId = t->id;
+        } else 
+            (*first).index = leaf->num_keys;
     return;
 }
 
-/*int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
+int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
     // Find key
 	int i = 0;
 	while (compare(fd, get_key(fd, n->id, i), key) != 0)
 		i++;
-	// Shift others accorfingly
-	for (++i; i < n->num_keys; i++)
-        memcpy(get_key(fd, n->id, i - 1), get_key(fd, n->id, i), header[fd].length);
-
-	int num_children = n->is_leaf ? n->num_keys + 2: n->num_keys + 1;
-	// Find record
-	i = 0;
+		
+	// Shift keys accordingly
+	for (int j = i + 1; j < n->num_keys; j++)
+        memcpy(get_key(fd, n->id, j - 1), get_key(fd, n->id, j), header[fd].length);
+	  
+	// Shift children accordingly
+	for (int j = i + 1; j < n->num_keys + 1; j++)
+		n->children[j] = n->children[j + 1];
 	
-	while (!(n->children[i].pagenum == record.pagenum&&n->children[i].recnum == record.recnum))
-		i++;
-	// Shift others accordingly
-	for (++i; i < num_children; i++)
-		n->children[i - 1] = n->children[i];
-	n->num_keys--;
-
 	if (n->is_leaf)
-        n->children[n->num_keys + 1] = NULL;
+	    n->children[n->num_keys + 1].pagenum = -1;
 	else
-        n->children[n->num_keys] = NULL;
-
+	    n->children[n->num_keys].pagenum = -1;
+	n->num_keys--;/*
+	for (int i = 0; i < n->num_keys; i++)
+        printf("%d ", n->children[i]);
+    printf("\n");*/  
+    
     if (n->num_keys == 0 && n != root) {
-        unpinPage(fd, n->id, TRUE);
         delete_Bnode(fd, n->id);
     }
-
 	if (n == root) {
         if (root->num_keys > 0)
             return root;
-
         B_node *new_root = NULL;
         if (!root->is_leaf) {
             new_root = get_Bnode(fd, root->children[0]);
             if (new_root == NULL) return NULL;
-            new_root->parent = -1;
+            new_root->parent.pagenum = -1;
         }
         else {
             new_root = make_leaf(fd);
             if (new_root == NULL) return NULL;
         }
-        root[fd] = new_root->id;
-        unpinPage(fd, new_root->id, TRUE);
-        unpinPage(fd, root->id, TRUE);
+        rootarry[fd] = new_root->id;
         delete_Bnode(fd, root->id);
         return 1;
 	}
     return 1;
 }
 
-int remove(int fd, B_node *root, char *key) {
-	RECID key_record = NULL;
+int delete(int fd, B_node *root, char *key) {
+	RECID key_record = {-1, -1};
 	if (root == NULL) {
         return NULL;
     }
-
 	B_node *leaf = find_leaf(fd, root, key);
 	for (int i = 0; i < leaf->num_keys; i++)
-		if (compare(fd, get_key(fd, leaf->id, i) key) == 0) {
+		if (compare(fd, get_key(fd, leaf->id, i), key) == 0) {
             key_record = leaf->children[i];
 		}
-
-	if (key_record != NULL && leaf != NULL) {
+		
+	if (key_record.pagenum != -1 && leaf != NULL) {
 		delete_entry(fd, root, leaf, key, key_record);
 		return 0;
 	}
-
 	return -12;
 }
-
-/*
-void destroy_tree (B_node *root) {
-    int i;
-	if (root->is_leaf)
-		for (i = 0; i < root->num_keys; i++)
-			free(root->children);
-	else
-		for (i = 0; i <= root->num_keys; i++)
-			destroy_tree_nodes(root->children[i]);
-	free(root->children);
-	free(root->keys);
-	free(root);
-}
-*/
-
-void AM_Init() {
-
-}
-
-int  AM_CreateIndex	(const char *fileName, int indexNo, char attrType, int attrLength, bool_t isUnique) {
-
-}
-
-int  AM_DestroyIndex	(const char *fileName, int indexNo) {
-
-}
-
-int  AM_OpenIndex       (const char *fileName, int indexNo) {
-
-}
-
-int  AM_CloseIndex      (int fileDesc) {
-
-}
-
-int  AM_InsertEntry	(int fileDesc, char *value, RECID recId) {
-//    B_node *r = get_Bnode(fileDesc, root[fileDesc]);
-//    insert(fd, r, value, recId);
-}
-
-int  AM_DeleteEntry     (int fileDesc, char *value, RECID recId) {
-
-}
-
-int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
-
-}
-
-RECID AM_FindNextEntry	(int scanDesc) {
-
-}
-
-int  AM_CloseIndexScan	(int scanDesc) {
-
-}
-
-void AM_PrintError	(const char *errString) {
-
-}
-
-
 
 int main()
 {
@@ -602,7 +562,7 @@ int main()
     
     }
     //printf("%d\n", root->id.pagenum );
-    printf("ROOT %d\n", *(int *)get_key(0, root->id, 0));
+    //printf("ROOT %d\n", *(int *)get_key(0, root->id, 0));
 	
 	B_node *node = get_first_Bnode(0, get_Bnode(0, rootarry[0]));
 	entry e = {node -> id, 0};
@@ -613,18 +573,22 @@ int main()
 	}
 	entry first = {-1, -1};
 	entry last = {-1, -1};
-	int x = 7;
+	int x = 100;
 	insert(0, get_Bnode(0, rootarry[0]), (char *)&x, recId);
 	find_equal(0, get_Bnode(0, rootarry[0]), (char *)&x, &first, &last);
 	printf("%d\n", *(int *)get_key(0, first.nodeId, first.index));
-	get_next_entry(0, &first);
+	/*get_next_entry(0, &first);
 	printf("%d\n", *(int *)get_key(0, first.nodeId, first.index));
-	find_greater(0,get_Bnode(0, rootarry[0]), (char *)&x, &first, &last);
+	*/
+	int d = 100;
+	delete(0, get_Bnode(0, rootarry[0]), (char *)&d);
+	find_gequal(0,get_Bnode(0, rootarry[0]), (char *)&x, &first, &last);
+	printf("%d %d %d %d\n", first.nodeId.pagenum, first.index, last.nodeId.pagenum, last.index);
 	while (first.nodeId.pagenum <= last.nodeId.pagenum) {
 	    //printf("%d %d %d %d\n", first.nodeId.pagenum, first.index, last.nodeId.pagenum, last.index);
-	    if (first.nodeId.pagenum == last.nodeId.pagenum && first.index >= last.index)
-	        break;
 	    printf("%d\n", *(int *)get_key(0, first.nodeId, first.index));
+	    if (first.nodeId.pagenum == last.nodeId.pagenum && first.index >= last.index - 1)
+	        break;
 	    get_next_entry(0, &first);
 	    //printf("%d %d %d %d\n", first.nodeId.pagenum, first.index, last.nodeId.pagenum, last.index);
 	}
