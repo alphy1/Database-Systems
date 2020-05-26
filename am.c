@@ -6,7 +6,7 @@
 #include "minirel.h"
 #include "bf.h"
 #include "pf.h"
-
+#include "hf.h"
 #define ORDER 8
 
 struct B_node;
@@ -38,12 +38,26 @@ int AM_SAVE_ERROR(int error){
     return error;
 }
 
+typedef struct{
+    int opened;
+		int fileDesc;
+    int op;
+    entry curr;
+    entry first;
+    entry last;
+//test1 place to front
+    char value[256];      
+}AMScan;
+
+//test2
+static AMScan Scan_Table[MAXISCANS];
+
 
 #define unpinPage(fd, nodeId, dirty)  PF_UnpinPage(fd, nodeId.pagenum, dirty)
 int ldpn[10000];
 char * ldp[10000];
 int cntforld;
-int AMerrno;
+int AMerrno = 0;
 char *findld(pn)
 {
 	int i;
@@ -410,7 +424,11 @@ B_node *find_leaf(int fd, B_node *root, char *key) {
 int insert(int fd, B_node *root, char *key, RECID recId) {
    
 	B_node *leaf = find_leaf(fd, root, key);
-
+    //test3
+    for (int i=0;i<leaf->num_keys;i++)
+        if(leaf->children[i+1].recnum==-1&&compare(fd,get_key(fd,leaf->id,i),key)==0){leaf->children[i+1]=recId;return 1;}
+            
+        
 	if (leaf->num_keys < order - 1) {
         int insertInto = 0;
         while (insertInto < leaf->num_keys && compare(fd, get_key(fd, leaf->id, insertInto), key) < 0)
@@ -616,7 +634,15 @@ int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
 	int i = 0;
 	while (compare(fd, get_key(fd, n->id, i), key) != 0)
 		i++;
-		
+    
+
+    for(int x =0;x<MAXISCANS;x++){
+        AMScan s = Scan_Table[x];
+         printf("ddddddd %d %d %d %d %d %d %d\n",s.opened, s.curr.nodeId.pagenum,n->id.pagenum,s.curr.nodeId.recnum,n->id.recnum,s.curr.index,i);
+		if(s.opened==1&&s.curr.nodeId.pagenum==n->id.pagenum&&s.curr.nodeId.recnum==n->id.recnum&&s.curr.index==i)
+        {   printf("ddddddd %s %d\n",key, x);
+            if(i+1==n->num_keys&&n->children[n->num_keys + 1].pagenum==-1)Scan_Table[x].curr.index=-1;else get_next_entry(s.fileDesc, &Scan_Table[x].curr);}}
+
 	// Shift keys accordingly
 	for (int j = i + 1; j < n->num_keys; j++)
         memcpy(get_key(fd, n->id, j - 1), get_key(fd, n->id, j), header[fd].length);
@@ -657,7 +683,7 @@ int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
     return 1;
 }
 
-int delete(int fd, B_node *root, char *key) {
+int delete(int fd, B_node *root, char *key, RECID rid) {//test4 add param
 	RECID key_record = {-1, -1};
 	if (root == NULL) {
         return NULL;
@@ -665,11 +691,14 @@ int delete(int fd, B_node *root, char *key) {
 	B_node *leaf = find_leaf(fd, root, key);
 	for (int i = 0; i < leaf->num_keys; i++)
 		if (compare(fd, get_key(fd, leaf->id, i), key) == 0) {
-            key_record = leaf->children[i];
+            key_record = leaf->children[i+1];//test5 i+1
+            if(key_record.pagenum==rid.pagenum&&key_record.recnum==rid.recnum)
+            {leaf->children[i+1].recnum=-1;return 0;}
 		}
-		
-	if (key_record.pagenum != -1 && leaf != NULL) {
-		delete_entry(fd, root, leaf, key, key_record);
+    
+	if (key_record.pagenum==rid.pagenum&&key_record.recnum==rid.recnum) {//test6
+		leaf->children[i+1].recnum=-1;
+        
 		return 0;
 	}
 	return -12;
@@ -788,15 +817,17 @@ int  AM_OpenIndex       (const char *fileName, int indexNo) {
 	return fd;
 }
 
-int  AM_CloseIndex      (int fd) {
+int  AM_CloseIndex(int fd) {
 	
 	char *pagebuf;
+
 	if(PF_GetThisPage(fd, 0, &pagebuf) != PFE_OK)
 		return AM_SAVE_ERROR(AME_PF);
 		
-	AM_header hd={header[fd].type, header[fd].length, header[fd].rootId};
+    //test7 rootarry[fd]
+	AM_header hd={header[fd].type, header[fd].length, rootarry[fd]};
 	memcpy(pagebuf, &hd, sizeof(AM_header));
-	
+		
 	if(PF_UnpinPage(fd, 0, TRUE) != PFE_OK)
 		return AM_SAVE_ERROR(AME_PF);
 		
@@ -820,59 +851,22 @@ int  AM_DeleteEntry(int fileDesc, char *value, RECID recId) {
 	B_node * root = get_Bnode(fileDesc, rootarry[fileDesc]);
 	if(root==NULL)return AM_SAVE_ERROR(AME_FD);
 
-	int rtn = delete(fileDesc, root, value);
+	int rtn = delete(fileDesc, root, value, recId);//test8 add param
 	if(rtn==1)rtn = AME_OK;
 	unpinAll(fileDesc, TRUE);
 	return AM_SAVE_ERROR(rtn);;
 }
 
 
-typedef struct{
-    int opened;
-		int fileDesc;
-    int op;
-    entry curr;
-    entry first;
-    entry last;
-}AMScan;
-
-AMScan Scan_Table[MAXISCANS];
 
 int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 	RECID recId = {0,1};
-	int n = 43 ;
-    
-    	B_node *node = get_first_Bnode(fileDesc, get_Bnode(fileDesc, rootarry[fileDesc]));
-	entry e = {node -> id, 0};
-		 printf("%d  ", *(int*)get_key(fileDesc, rootarry[fileDesc], 0));
-	for (int i = 0; i < n - 1; ++i) {
-    	printf("%s\n", get_key(fileDesc, e.nodeId, e.index));
-	    get_next_entry(fileDesc, &e);
-	}
-
-    
+	
 	if(value == NULL)
 		op = ALL_OP;
 	
 	int i;
-   	/* B_node *a;
-        RECID aa;
-        int t = 8;
-            
-        for(i=1; i<11;i++)
-    {
-        for(int j=1; j<8;j++)
-        {        
-         aa.pagenum = i;
-         aa.recnum = t;
-         t += 360;
-         if(t > 2168)t=8;
-         a = get_Bnode(fileDesc,aa);  
-         printf("qqcbbb  %d  %d  %d\n",i,t,a->id.recnum);  
-         printf("cbbb  %d  %d  %d\n",i,a->id.pagenum,a->id.recnum);  
-        }
-    }
-    */
+
     
 	for(i=0;i<MAXISCANS;i++)
 		if(Scan_Table[i].opened == 0)
@@ -887,7 +881,7 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 	
 	B_node * root = get_Bnode(fileDesc,  rootarry[fileDesc]);
 	if(root==NULL)return AM_SAVE_ERROR(AME_FD);
-		
+		int t = 50;
 	switch(op){
 	 	case EQ_OP :
 			find_equal(fileDesc, root,  value, &Scan_Table[i].first, &Scan_Table[i].last);
@@ -898,9 +892,9 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 			Scan_Table[i].curr = Scan_Table[i].first;
 	 		break;
 	 	case GT_OP :
+            //test9 value
 			find_greater(fileDesc, root,  value, &Scan_Table[i].first, &Scan_Table[i].last);
 			Scan_Table[i].curr = Scan_Table[i].first;
-            //printf("
 	 		break;
 	 	case LE_OP :
 			find_lequal(fileDesc, root,  value, &Scan_Table[i].first, &Scan_Table[i].last);
@@ -911,9 +905,8 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 			Scan_Table[i].curr = Scan_Table[i].first;
 	 		break;
 	 	case NE_OP :
-	 		find_equal(fileDesc, root,  value, &Scan_Table[i].first, &Scan_Table[i].last);
-	 		Scan_Table[i].curr = Scan_Table[i].first;
-	 		break;
+            //test10
+	 		memcpy(Scan_Table[i].value, value, header[fileDesc].length);
 	 	case ALL_OP :
 	 		Scan_Table[i].first.nodeId = get_first_Bnode(fileDesc, root)->id;
 	 		Scan_Table[i].first.index = 0;
@@ -951,31 +944,42 @@ RECID AM_FindNextEntry	(int scanDesc) {
 		AM_SAVE_ERROR(AME_INVALIDSCANDESC);
         return invalrecid;
     }
-    
+
 	AMScan sc = Scan_Table[scanDesc];
 
-    if(sc.curr.index = -1)
-    {
+        
+    if(sc.curr.index == -1)
+    {   //test11 unpinAll
+        unpinAll(sc.fileDesc, FALSE);
 		AM_SAVE_ERROR(AME_EOF);
         return invalrecid;
     }
-			
 
+			
 	B_node * node = get_Bnode(sc.fileDesc,  sc.curr.nodeId);
+    //test12
+    if(node->children[sc.curr.index+1].recnum==-1||sc.op==NE_OP&&compare(sc.fileDesc,get_key(sc.fileDesc, sc.curr.nodeId, sc.curr.index),sc.value)==0){
+        if(node->children[sc.curr.index+2].pagenum!=-1)get_next_entry(sc.fileDesc, &sc.curr);else sc.curr.index=-1;Scan_Table[scanDesc]=sc;return AM_FindNextEntry(scanDesc);}
+        
 	RECID recid =  node->children[sc.curr.index+1];
-	
+ 
 	if (sc.curr.index + 1 < node->num_keys) 
 		Scan_Table[scanDesc].curr.index++;
+    else if(node->children[node->num_keys + 1].pagenum == -1) Scan_Table[scanDesc].curr.index=-1;   //test13
 	else
 	{
 		Scan_Table[scanDesc].curr.nodeId = get_Bnode(sc.fileDesc, node->children[node->num_keys + 1])->id;
 		Scan_Table[scanDesc].curr.index=0;
 	}
-	
+
+	//test14
+    sc = Scan_Table[scanDesc];
+    
     if(sc.curr.nodeId.pagenum == sc.last.nodeId.pagenum 
     && sc.curr.nodeId.recnum == sc.last.nodeId.recnum 
     && sc.curr.index==sc.last.index) 
-		Scan_Table[scanDesc].curr.index=-1;
+        Scan_Table[scanDesc].curr.index=-1;
+        
         
 	unpinAll(sc.fileDesc, FALSE);
 	return recid;
@@ -985,6 +989,7 @@ int  AM_CloseIndexScan	(int scanDesc) {
 	if(scanDesc > MAXISCANS || Scan_Table[scanDesc].opened != 1)
 		 return AM_SAVE_ERROR(AME_INVALIDSCANDESC);
 	Scan_Table[scanDesc].opened = 0;
+    printf("tttt %d", scanDesc);
 	return AME_OK;
 }
 
