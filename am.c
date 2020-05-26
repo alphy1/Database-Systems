@@ -695,10 +695,9 @@ int delete(int fd, B_node *root, char *key, RECID rid) {//test4 add param
             if(key_record.pagenum==rid.pagenum&&key_record.recnum==rid.recnum)
             {leaf->children[i+1].recnum=-1;return 0;}
 		}
-    
-	if (key_record.pagenum==rid.pagenum&&key_record.recnum==rid.recnum) {//test6
-		leaf->children[i+1].recnum=-1;
-        
+
+	if (key_record.pagenum != -1 && leaf == NULL) {//test6 ==
+		delete_entry(fd, root, leaf, key, key_record);
 		return 0;
 	}
 	return -12;
