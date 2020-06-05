@@ -1,7 +1,7 @@
-#include "/mnt/c/users/user/desktop/minirel/h/minirel.h"
-#include "/mnt/c/users/user/desktop/minirel/h/fe.h"
-#include "/mnt/c/users/user/desktop/minirel/h/hf.h"
-//#include "/mnt/c/users/user/desktop/minirel/h/am.h"
+#include "minirel.h"
+#include "fe.h"
+#include "hf.h"
+//#include "am.h"
 
 #include "sys/types.h"
 #include "sys/stat.h"
@@ -137,6 +137,7 @@ int DestroyTable(const char *relName){
 		}
 	}
 	HF_DestroyFile(relName);
+	return FEE_OK;
 }
 int BuildIndex(const char *relName,	const char *attrName){
 	ATTRDESCTYPE *attr_node = attr_head;
@@ -150,7 +151,7 @@ int BuildIndex(const char *relName,	const char *attrName){
 	}
 	RELDESCTYPE *rel_node = rel_head;
 	while(rel_node != NULL){
-		if(equal_rel_name(attr_node->relname,relName)){
+		if(equal_rel_name(rel_node->relname,relName)){
 			rel_node->indexcnt++;
 			break;
 		}
@@ -161,7 +162,7 @@ int BuildIndex(const char *relName,	const char *attrName){
 int DropIndex(const char *relname, const char *attrName){
 	ATTRDESCTYPE *attr_node = attr_head;
 	while(attr_node != NULL){
-		if(equal_rel_name(attr_node->relname,relname) && (attrName == NULL && equal_rel_name(attr_node->attrname,attrName))){
+		if(equal_rel_name(attr_node->relname,relname) && (attrName == NULL || equal_rel_name(attr_node->attrname,attrName))){
 			//AM_CreateIndex(relname,attr_node->attrno,attr_node->attrtype,attr_node->attrlen,FALSE);
 			attr_node->indexed = FALSE;
 			break;
@@ -170,12 +171,13 @@ int DropIndex(const char *relname, const char *attrName){
 	}
 	RELDESCTYPE *rel_node = rel_head;
 	while(rel_node != NULL){
-		if(equal_rel_name(attr_node->relname,relname)){
+		if(equal_rel_name(rel_node->relname,relname)){
 			rel_node->indexcnt--;
 			break;
 		}
 		rel_node = rel_node->next;
 	}
+	return FEE_OK;
 }
 void relax(int x){
 	for(int i = 0; i < 15*x+1; i++){
@@ -287,21 +289,9 @@ int LoadTable(const char *relName, const char *fileName){
 	int fd = HF_OpenFile(relName);
 	int unixfd = open(fileName, O_RDWR|O_SYNC);
 	char record[PAGE_SIZE];
-    while(read(unixfd, &record, record_size) == record_size){
-		RECID recid = HF_InsertRec(fd,record);
-		printf("%d %d\n",recid.pagenum,recid.recnum);
-	}
-	HF_CloseFile(unixfd);
-
-	fd = HF_OpenFile(relName);
-	
-	RECID recid = HF_GetFirstRec(fd,record);
-	printf("%d %d\n",recid.pagenum,recid.recnum);
-	/*while(HF_ValidRecId(fd,recid)){
-		printf("%d %d\n",recid.pagenum,recid.recnum);
-			recid = HF_GetNextRec(fd,recid,record);
-	}*/
-	HF_CloseFile(unixfd);
+    while(read(unixfd, &record, record_size) == record_size)
+		HF_InsertRec(fd,record);
+	HF_CloseFile(fd);
 	return FEE_OK;
 }
 int HelpTable(const char *relName){
