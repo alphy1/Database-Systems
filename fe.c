@@ -1,7 +1,7 @@
 #include "minirel.h"
 #include "fe.h"
 #include "hf.h"
-//#include "am.h"
+#include "am.h"
 
 #include "sys/types.h"
 #include "sys/stat.h"
@@ -16,19 +16,23 @@
 #define MAXSTRINGLEN 255
 #define RELCAT_NUM_ATTRS 5
 #define ATTRCAT_NUM_ATTRS 7
+
 ATTR_DESCR out_attrs[ATTRCAT_NUM_ATTRS];
 ATTR_DESCR in_attrs[RELCAT_NUM_ATTRS];
 ATTR_DESCR attributes[MAXN];
 int FEerrno,initialized; //FE layer error code
+
 void make_assign(ATTR_DESCR *attr, const char *name, char type, int len){
 	attr->attrName = (char *) malloc(MAXNAME);
 	strcpy(attr->attrName, name);
 	attr->attrType = type;
 	attr->attrLen = len;
 }
+
 int FE_SAVE_ERROR(int error){
 	return FEerrno = error;
 }
+
 typedef struct _relation_desc {
     char relname[MAXNAME];	/* relation name			*/
     int  relwid;		/* tuple width (in bytes)		*/
@@ -38,6 +42,7 @@ typedef struct _relation_desc {
 	struct _relation_desc *next;
 } RELDESCTYPE;
 RELDESCTYPE *rel_head;
+
 typedef struct _attribute_desc {
     char relname[MAXNAME];	/* relation name			*/
     char attrname[MAXNAME];	/* attribute name			*/
@@ -49,7 +54,8 @@ typedef struct _attribute_desc {
 	struct _attribute_desc *next; //Next of Single-Linked-List
 } ATTRDESCTYPE;
 ATTRDESCTYPE *attr_head;
-int equal_rel_name(char *x,const char *y){
+
+int equal_rel_name(char *x, const char *y){
 	int xx = strlen(x),yy = strlen(y);
 	if(xx != yy)
 		return 0;
@@ -58,17 +64,18 @@ int equal_rel_name(char *x,const char *y){
 			return 0;
 	return 1;
 }
-int CreateTable(const char *relName,int numAttrs,ATTR_DESCR attrs[],const char *primAttrName){
+
+int CreateTable(const char *relName, int numAttrs,ATTR_DESCR attrs[], const char *primAttrName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
 	for(int i = 0; i < numAttrs; i++){
 		if(strlen(attrs[i].attrName) > MAXNAME)
 			return FE_SAVE_ERROR(FEE_ATTRNAMETOOLONG);
-		if(attrs[i].attrType != INT_TYPE && attrs[i].attrType != STRING_TYPE && 
+		if(attrs[i].attrType != INT_TYPE && attrs[i].attrType != STRING_TYPE &&
 			attrs[i].attrType != REAL_TYPE && attrs[i].attrType != BOOL_TYPE)
 			return FE_SAVE_ERROR(FEE_INVATTRTYPE);
 	}
-	for(int i = 0; i < numAttrs; i++)	
+	for(int i = 0; i < numAttrs; i++)
 		for(int j = i + 1; j < numAttrs; j++)
 			if(equal_rel_name(attrs[i].attrName,attrs[j].attrName))
 				return FE_SAVE_ERROR(FEE_DUPLATTR);
@@ -93,12 +100,12 @@ int CreateTable(const char *relName,int numAttrs,ATTR_DESCR attrs[],const char *
 		tmp->offset = offset; tmp->attrlen = attrs[i].attrLen;
 		tmp->attrtype = attrs[i].attrType; tmp->indexed = FALSE;
 		tmp->attrno = i; tmp->next = NULL;
-		attr_node->next = tmp; 
+		attr_node->next = tmp;
 		attr_node = tmp;
 		offset += attrs[i].attrLen;
 	}
 	RELDESCTYPE *rel_node = rel_head, *tmp = (RELDESCTYPE*)malloc(sizeof(RELDESCTYPE));
-	strcpy(tmp->relname,relName); 
+	strcpy(tmp->relname,relName);
 	if(primAttrName != NULL)
 		strcpy(tmp->primattr,primAttrName);
 	tmp->relwid = offset; tmp->attrcnt = numAttrs;
@@ -114,6 +121,7 @@ int CreateTable(const char *relName,int numAttrs,ATTR_DESCR attrs[],const char *
 		return FE_SAVE_ERROR(FEE_HF);
 	return FEE_OK;
 }
+
 int DestroyTable(const char *relName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
@@ -156,6 +164,7 @@ int DestroyTable(const char *relName){
 		return FE_SAVE_ERROR(FEE_HF);
 	return FEE_OK;
 }
+
 int BuildIndex(const char *relName,	const char *attrName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
@@ -186,6 +195,7 @@ int BuildIndex(const char *relName,	const char *attrName){
 	}
 	return FEE_OK;
 }
+
 int DropIndex(const char *relname, const char *attrName){
 	if(strlen(relname) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
@@ -211,14 +221,16 @@ int DropIndex(const char *relname, const char *attrName){
 	}
 	return FEE_OK;
 }
+
 void relax(int x){//Printing the frame of table
 	for(int i = 0; i < 15*x+1; i++){
 		if(i%15 == 0)
 			printf("+");
-		else	
+		else
 			printf("-");
 	}puts("");
 }
+
 int PrintTable(const char *relName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
@@ -311,6 +323,7 @@ int PrintTable(const char *relName){
 	}
 	return FEE_OK;
 }
+
 int LoadTable(const char *relName, const char *fileName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
@@ -329,17 +342,19 @@ int LoadTable(const char *relName, const char *fileName){
 		return FE_SAVE_ERROR(FEE_UNIX);
 	char record[PAGE_SIZE];
     while(read(unixfd, &record, record_size) == record_size)
-		HF_InsertRec(fd,record);
+		HF_InsertRec(fd, record);
+
 	if(HF_CloseFile(fd) != 0)
 		return FE_SAVE_ERROR(FEE_HF);
 	return FEE_OK;
 }
+
 int HelpTable(const char *relName){
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
 	RELDESCTYPE *rel_node = rel_head;
 	while(rel_node != NULL){
-		if(equal_rel_name(rel_node->relname,relName))	
+		if(equal_rel_name(rel_node->relname,relName))
 			printf("Relation  %s:\n	Prim Attr:  %s	No of Attrs:  %d	Tuple width:  %d	No of Indices:  %d\n",
 				relName,rel_node->primattr,rel_node->attrcnt,rel_node->relwid,rel_node->indexcnt);
 		rel_node = rel_node->next;
@@ -377,6 +392,7 @@ int HelpTable(const char *relName){
 		relax(6);
 	return FEE_OK;
 }
+
 char FE_Error_Names[FE_NERRORS][100]={"FE OK","Alredy indexed","Attribute name too long","Duplicate Attribute",
 									"Incomptabile join types","Incorrect Attributes","Internal Error","Invalid attribute type",
 									"Invalid buckets","Not from join relation","No such attribute","No such database",
@@ -385,23 +401,27 @@ char FE_Error_Names[FE_NERRORS][100]={"FE OK","Alredy indexed","Attribute name t
 									"Union compact","Wrong value type","Relation not same","No memory","End of file",
 									"Catalog change","String too long","Scan Table Full","Invalid Scan","Invalid scan desc",
 									"Invalid Operation"};
+
 void FE_PrintError(const char *errString){
     fprintf(stderr, "%s\n", errString);
 	if(-FEerrno < FE_NERRORS)
     	fprintf(stderr, "%s\n", FE_Error_Names[-FEerrno]);
 }
+
 void FE_Init(void){
 	HF_Init();
 	//AM_Init();
 }
+
 void DBdestroy(const char *dbname){
 	char command[MAXN];
 	sprintf(command,"rm -r %s\n",dbname);
 	system(command);
 }
+
 void DBconnect(const char *dbname){
 	chdir(dbname);
-	
+
 	FILE *fp = fopen("relcat","r");
 	if(fp == NULL){
 		FE_SAVE_ERROR(FEE_RELCAT);
@@ -418,6 +438,7 @@ void DBconnect(const char *dbname){
 	fscanf(fp,"%p",&attr_head);
 	fclose(fp);
 }
+
 void DBclose(const char *dbname){
 	FILE *fp = fopen("relcat","w");
 	fprintf(fp,"%p",rel_head);
@@ -429,6 +450,7 @@ void DBclose(const char *dbname){
 
 	chdir("..");
 }
+
 void DBcreate(const char *dbname){
 	if(!initialized)
 		FE_Init(), initialized = 1;
@@ -439,7 +461,7 @@ void DBcreate(const char *dbname){
 
 	//Connecting DB
 	chdir(dbname);
-	attr_head = NULL; 
+	attr_head = NULL;
 	rel_head = NULL;
 	//Creating relcat catalog
 	make_assign(&in_attrs[0],"relname",STRING_TYPE,MAXNAME);
@@ -447,7 +469,7 @@ void DBcreate(const char *dbname){
 	make_assign(&in_attrs[2],"attrcnt",INT_TYPE,sizeof(int));
 	make_assign(&in_attrs[3],"indexcnt",INT_TYPE,sizeof(int));
 	make_assign(&in_attrs[4],"primattr",STRING_TYPE,MAXNAME);
-	
+
 	//Creating attrcat catalog
 	make_assign(&out_attrs[0],"relname",STRING_TYPE,MAXNAME);
 	make_assign(&out_attrs[1],"attrname",STRING_TYPE,MAXNAME);
@@ -462,4 +484,201 @@ void DBcreate(const char *dbname){
 	if (CreateTable("attrcat", ATTRCAT_NUM_ATTRS, out_attrs, "relname") != FEE_OK)
 		FE_PrintError("Relation creation failed in create_student");
 	DBclose(dbname);
+}
+
+int  Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
+    char record[PAGE_SIZE];
+    int indexNo[MAXN], n = 0;
+    char indexedAttr[MAXN][PAGE_SIZE];
+    memset(record, '\0', PAGE_SIZE);
+    ATTRDESCTYPE *attr_node = attr_head;
+    while (attr_node != NULL) {
+        if (attr_node->relname == relName) {
+            int is_attr = 1;
+            char attr[attr_node->attrlen];
+            for (int i = 0; i < numAttrs; ++i) {
+                if (values[i].attrName == attr_node->attrname) {
+                    is_attr = 0;
+                    memcpy(attr, values[j].value, attr_node->attrlen);
+                }
+            }
+            if (is_attr)
+                memset(attr, '\0', attr_node->attrlen);
+            record = record + attr;
+
+            if (attr_node->indexed) {
+                indexNo[++n] = attr_node->attrno;
+                indexedAttr[n] = attr;
+            }
+        }
+        attr_node = attr_node->next;
+    }
+
+    int hf_fd = get_hf_fd(relName);
+    if (hf_fd < 0)
+        return FE_SAVE_ERROR(FEE_HF);
+    RECID recid = HF_InsertRec(hf_fd, record);
+    if (!HF_ValidRecId(hf_fd, recid)){
+        return FE_SAVE_ERROR(FEE_HF);
+    }
+    for (int i = 0; i < n; ++i) {
+        int am_fd;
+        if (am_fd = get_am_fd(relName, indexNo[i]) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+        if (AM_InsertEntry(am_fd, (char *)&indexedAttr[i], recid) != AME_OK)
+            return FE_SAVE_ERROR(FEE_AM);
+    }
+    return FEE_OK;
+}
+
+int  Delete(const char *relName, const char *selAttr, int op, int valType, int valLength, char *value) {
+    if (selAttr == NULL)
+        return DestroyTable(relName);
+
+    char record[PAGE_SIZE];
+    ATTRDESCTYPE *attr_node = attr_head;
+    ATTRDESCTYPE *sel_attr = NULL;
+    int indexNo = -1;
+    while (attr_node != NULL) {
+        if (attr_node->relname == relName) {
+            char attr[attr_node->attrlen];
+            if (attr_node->attrname == selAttr) {
+                if (attr_node->indexed)
+                    indexNo = attr_node->attrno;
+                sel_attr = attr_node;
+                memset(attr, value, attr_node->attrlen);
+            }
+            else
+                memset(attr, '\0', attr_node->attrlen);
+            record = record + attr;
+        }
+        attr_node = attr_node->next;
+    }
+
+    int hf_fd;
+    if ((hf_fd = get_hf_fd(relName)) < 0)
+        return FE_SAVE_ERROR(FEE_HF);
+
+    if (indexNo > -1) {
+        int am_fd, sd;
+        if (am_fd = get_am_fd(relName, indexNo) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+        if ((sd = AM_OpenIndexScan(am_fd, op, value)) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+
+        char del[PAGE_SIZE];
+        memset(del, ' ', PAGE_SIZE);
+        while (1) {
+            recid = AM_FindNextEntry(sd);
+            if (!HF_ValidRecId(hf_fd, recid))
+                if (AMerrno == AME_EOF)
+                    break;
+                else
+                    return FE_SAVE_ERROR(FEE_AM);
+
+            if (HF_GetThisRec(hf_fd, recid, del) != HFE_OK)
+                return FE_SAVE_ERROR(FEE_HF);
+            if (AM_DeleteEntry(am_fd, del, recid) != AME_OK)
+                return FE_SAVE_ERROR(FEE_AM);
+            if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+                return FE_SAVE_ERROR(FEE_HF);
+        }
+        if (AM_CloseIndexScan(sd) != AME_OK)
+            return FE_SAVE_ERROR(FEE_AM);
+        return FEE_OK;
+    }
+
+    if (valType == )
+    int sd;
+    if ((sd = HF_OpenFileScan(hf_fd, attr->attrtype, attr->attrlen, attr->offset, op, value)) <0)
+        return FE_SAVE_ERROR(FEE_HF);
+
+    RECID recid = HF_FindNextRec(sd, (char *)&record);
+    while (HF_ValidRecId(hf_fd, recid)) {
+        if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+            return FE_SAVE_ERROR(FEE_HF);
+        recid = HF_FindNextRec(sd, (char *)&record);
+    }
+    return FEE_OK;
+}
+
+int  Select(const char *srcRelName, const char *selAttr, int op, int valType, int valLength, char *value, int numProjAttrs, char *projAttrs[], char *resRelName) {
+    ATTR_DESCR attr[numProjAttrs];
+    char record[PAGE_SIZE];
+    int indexNo;
+    memset(record, '\0', PAGE_SIZE);
+    ATTRDESCTYPE *attr_node = attr_head;
+    ATTRDESCTYPE *sel_attr = NULL;
+    while (attr_node != NULL) {
+        if (attr_node->relname == srcRelName) {
+            for (int i = 0; i < numProjAttrs; ++i) {
+                if (projAttrs[i] == attr_node->attrname) {
+                    attr[i].attrLen = attr_node->attrlen;
+                    attr[i].attrName = attr_node->attrname;
+                    attr[i].attrType = attr_node->attrtype;
+                }
+            }
+
+            char attrName[attr_node->attrlen];
+            if (attr_node->attrname == selAttr) {
+                if (attr_node->indexed)
+                    indexNo = attr_node->attrno;
+                sel_attr = attr_node;
+                memset(attrName, value, attr_node->attrlen);
+            }
+            else
+                memset(attrName, '\0', attr_node->attrlen);
+            record = record + attr;
+        }
+        attr_node = attr_node->next;
+    }
+
+    int error = CreateTable(resRelName, numProjAttrs, attr, NULL);
+    if (error != FEE_OK)
+        return error;
+
+    int hf_fd;
+    if ((hf_fd = get_hf_fd(srcRelName)) < 0)
+        return FE_SAVE_ERROR(FEE_HF);
+
+    if (indexNo > -1) {
+        int am_fd, sd;
+        if (am_fd = get_am_fd(srcRelName, indexNo) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+        if ((sd = AM_OpenIndexScan(am_fd, op, value)) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+
+        char new_rec[PAGE_SIZE];
+        memset(new_rec, ' ', PAGE_SIZE);
+        while (1) {
+            recid = AM_FindNextEntry(sd);
+            if (!HF_ValidRecId(hf_fd, recid))
+                if (AMerrno == AME_EOF)
+                    break;
+                else
+                    return FE_SAVE_ERROR(FEE_AM);
+
+            if (HF_GetThisRec(hf_fd, recid, new_rec) != HFE_OK)
+                return FE_SAVE_ERROR(FEE_HF);
+
+
+        }
+        if (AM_CloseIndexScan(sd) != AME_OK)
+            return FE_SAVE_ERROR(FEE_AM);
+        return FEE_OK;
+    }
+
+    if (valType == )
+    int sd;
+    if ((sd = HF_OpenFileScan(hf_fd, attr->attrtype, attr->attrlen, attr->offset, op, value)) <0)
+        return FE_SAVE_ERROR(FEE_HF);
+
+    RECID recid = HF_FindNextRec(sd, (char *)&record);
+    while (HF_ValidRecId(hf_fd, recid)) {
+        if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+            return FE_SAVE_ERROR(FEE_HF);
+        recid = HF_FindNextRec(sd, (char *)&record);
+    }
+    return FEE_OK;
+
 }
