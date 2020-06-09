@@ -11,6 +11,7 @@
 #include "stdio.h"
 #include "assert.h"
 #include "stdlib.h"
+#include <string.h>
 #define BOOL_TYPE     'b'
 #define MAXN 256
 #define MAXSTRINGLEN 255
@@ -487,28 +488,28 @@ void DBcreate(const char *dbname){
 }
 
 int  Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
-    char record[PAGE_SIZE];
+    char record[PAGE_SIZE] = "";
     int indexNo[MAXN], n = 0;
     char indexedAttr[MAXN][PAGE_SIZE];
-    memset(record, '\0', PAGE_SIZE);
     ATTRDESCTYPE *attr_node = attr_head;
     while (attr_node != NULL) {
-        if (attr_node->relname == relName) {
+        if (strcmp(attr_node->relname, relName) == 0) {
             int is_attr = 1;
             char attr[attr_node->attrlen];
             for (int i = 0; i < numAttrs; ++i) {
-                if (values[i].attrName == attr_node->attrname) {
+                if (strcmp(values[i].attrName, attr_node->attrname) == 0) {
                     is_attr = 0;
-                    memcpy(attr, values[j].value, attr_node->attrlen);
+                    memcpy(attr, values[i].value, attr_node->attrlen);
                 }
             }
             if (is_attr)
-                memset(attr, '\0', attr_node->attrlen);
-            record = record + attr;
+                return FE_SAVE_ERROR(FEE_NOSUCHATTR);
+
+            strcat(record, attr);
 
             if (attr_node->indexed) {
                 indexNo[++n] = attr_node->attrno;
-                indexedAttr[n] = attr;
+                memcpy(indexedAttr[n], attr, attr_node->attrlen);
             }
         }
         attr_node = attr_node->next;
@@ -517,10 +518,11 @@ int  Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
     int hf_fd = get_hf_fd(relName);
     if (hf_fd < 0)
         return FE_SAVE_ERROR(FEE_HF);
+
     RECID recid = HF_InsertRec(hf_fd, record);
-    if (!HF_ValidRecId(hf_fd, recid)){
+    if (!HF_ValidRecId(hf_fd, recid))
         return FE_SAVE_ERROR(FEE_HF);
-    }
+
     for (int i = 0; i < n; ++i) {
         int am_fd;
         if (am_fd = get_am_fd(relName, indexNo[i]) < 0)
@@ -531,27 +533,29 @@ int  Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
     return FEE_OK;
 }
 
-int  Delete(const char *relName, const char *selAttr, int op, int valType, int valLength, char *value) {
+int Delete(const char *relName, const char *selAttr, int op, int valType, int valLength, char *value) {
     if (selAttr == NULL)
         return DestroyTable(relName);
 
-    char record[PAGE_SIZE];
+    char record[PAGE_SIZE] = "";
     ATTRDESCTYPE *attr_node = attr_head;
     ATTRDESCTYPE *sel_attr = NULL;
     int indexNo = -1;
     while (attr_node != NULL) {
-        if (attr_node->relname == relName) {
+        if (strcmp(attr_node->relname, relName) == 0) {
             char attr[attr_node->attrlen];
-            if (attr_node->attrname == selAttr) {
+            if (strcmp(attr_node->attrname, selAttr) == 0) {
                 if (attr_node->indexed)
                     indexNo = attr_node->attrno;
                 sel_attr = attr_node;
-                memset(attr, value, attr_node->attrlen);
+                memcpy(attr, value, attr_node->attrlen);
             }
             else
                 memset(attr, '\0', attr_node->attrlen);
-            record = record + attr;
+
+            strcat(record, attr);
         }
+
         attr_node = attr_node->next;
     }
 
@@ -569,7 +573,7 @@ int  Delete(const char *relName, const char *selAttr, int op, int valType, int v
         char del[PAGE_SIZE];
         memset(del, ' ', PAGE_SIZE);
         while (1) {
-            recid = AM_FindNextEntry(sd);
+            RECID recid = AM_FindNextEntry(sd);
             if (!HF_ValidRecId(hf_fd, recid))
                 if (AMerrno == AME_EOF)
                     break;
@@ -585,51 +589,53 @@ int  Delete(const char *relName, const char *selAttr, int op, int valType, int v
         }
         if (AM_CloseIndexScan(sd) != AME_OK)
             return FE_SAVE_ERROR(FEE_AM);
-        return FEE_OK;
-    }
+    } else {
+        int length = sel_attr->attrlen;
+        if (valType == 'c')
+            length = valLength;
 
-    if (valType == )
-    int sd;
-    if ((sd = HF_OpenFileScan(hf_fd, attr->attrtype, attr->attrlen, attr->offset, op, value)) <0)
-        return FE_SAVE_ERROR(FEE_HF);
-
-    RECID recid = HF_FindNextRec(sd, (char *)&record);
-    while (HF_ValidRecId(hf_fd, recid)) {
-        if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+        int sd;
+        if ((sd = HF_OpenFileScan(hf_fd, sel_attr->attrtype, length, sel_attr->offset, op, value)) < 0)
             return FE_SAVE_ERROR(FEE_HF);
-        recid = HF_FindNextRec(sd, (char *)&record);
+
+        RECID recid = HF_FindNextRec(sd, (char *)&record);
+        while (HF_ValidRecId(hf_fd, recid)) {
+            if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+                return FE_SAVE_ERROR(FEE_HF);
+            recid = HF_FindNextRec(sd, (char *)&record);
+        }
     }
     return FEE_OK;
 }
 
-int  Select(const char *srcRelName, const char *selAttr, int op, int valType, int valLength, char *value, int numProjAttrs, char *projAttrs[], char *resRelName) {
+int Select(const char *srcRelName, const char *selAttr, int op, int valType, int valLength, char *value, int numProjAttrs, char *projAttrs[], char *resRelName) {
     ATTR_DESCR attr[numProjAttrs];
-    char record[PAGE_SIZE];
-    int indexNo;
-    memset(record, '\0', PAGE_SIZE);
+    char record[PAGE_SIZE] = "";
+    int indexNo = -1;
     ATTRDESCTYPE *attr_node = attr_head;
     ATTRDESCTYPE *sel_attr = NULL;
     while (attr_node != NULL) {
-        if (attr_node->relname == srcRelName) {
+        if (strcmp(attr_node->relname, srcRelName) == 0) {
             for (int i = 0; i < numProjAttrs; ++i) {
-                if (projAttrs[i] == attr_node->attrname) {
+                if (strcmp(projAttrs[i], attr_node->attrname) == 0) {
                     attr[i].attrLen = attr_node->attrlen;
-                    attr[i].attrName = attr_node->attrname;
+                    memcpy(attr[i].attrName, attr_node->attrname, attr_node->attrlen);
                     attr[i].attrType = attr_node->attrtype;
                 }
             }
 
             char attrName[attr_node->attrlen];
-            if (attr_node->attrname == selAttr) {
+            if (strcmp(attr_node->attrname, selAttr) == 0) {
                 if (attr_node->indexed)
                     indexNo = attr_node->attrno;
                 sel_attr = attr_node;
-                memset(attrName, value, attr_node->attrlen);
+                memcpy(attrName, value, attr_node->attrlen);
             }
             else
                 memset(attrName, '\0', attr_node->attrlen);
-            record = record + attr;
+            strcat(record, attrName);
         }
+
         attr_node = attr_node->next;
     }
 
@@ -648,37 +654,77 @@ int  Select(const char *srcRelName, const char *selAttr, int op, int valType, in
         if ((sd = AM_OpenIndexScan(am_fd, op, value)) < 0)
             return FE_SAVE_ERROR(FEE_AM);
 
-        char new_rec[PAGE_SIZE];
-        memset(new_rec, ' ', PAGE_SIZE);
         while (1) {
-            recid = AM_FindNextEntry(sd);
+            RECID recid = AM_FindNextEntry(sd);
             if (!HF_ValidRecId(hf_fd, recid))
                 if (AMerrno == AME_EOF)
                     break;
                 else
                     return FE_SAVE_ERROR(FEE_AM);
 
+            char new_rec[PAGE_SIZE];
+            memset(new_rec, ' ', PAGE_SIZE);
             if (HF_GetThisRec(hf_fd, recid, new_rec) != HFE_OK)
                 return FE_SAVE_ERROR(FEE_HF);
 
-
+            ATTR_VAL val[numProjAttrs];
+            for (int i = 0; i < numProjAttrs; ++i) {
+                memcpy(val[i].attrName, attr[i].attrName, attr[i].attrLen);
+                val[i].valLength = attr[i].attrLen;
+                val[i].valType = attr[i].attrType;
+            }
+            int c = 0;
+            for (int i = 0; i < numProjAttrs; ++i) {
+                val[i].value = "";
+                for (int j = 0; j < val[i].valLength; ++j, ++c) {
+                    value[j] = new_rec[c];
+                    value[j + 1] = '\0';
+                }
+            }
+            int error = Insert(resRelName, numProjAttrs, val);
+            if (error != FEE_OK)
+                return error;
         }
+
         if (AM_CloseIndexScan(sd) != AME_OK)
             return FE_SAVE_ERROR(FEE_AM);
-        return FEE_OK;
-    }
+    } else {
+        int length = sel_attr->attrlen;
+        if (valType == 'c')
+            length = valLength;
 
-    if (valType == )
-    int sd;
-    if ((sd = HF_OpenFileScan(hf_fd, attr->attrtype, attr->attrlen, attr->offset, op, value)) <0)
-        return FE_SAVE_ERROR(FEE_HF);
-
-    RECID recid = HF_FindNextRec(sd, (char *)&record);
-    while (HF_ValidRecId(hf_fd, recid)) {
-        if (HF_DeleteRec(hf_fd, recid) != HFE_OK)
+        int sd;
+        if ((sd = HF_OpenFileScan(hf_fd, sel_attr->attrtype, length, sel_attr->offset, op, value)) <0)
             return FE_SAVE_ERROR(FEE_HF);
-        recid = HF_FindNextRec(sd, (char *)&record);
-    }
-    return FEE_OK;
 
+        RECID recid = HF_FindNextRec(sd, (char *)&record);
+        while (HF_ValidRecId(hf_fd, recid)) {
+            char new_rec[PAGE_SIZE];
+            memset(new_rec, ' ', PAGE_SIZE);
+            if (HF_GetThisRec(hf_fd, recid, new_rec) != HFE_OK)
+                return FE_SAVE_ERROR(FEE_HF);
+
+            ATTR_VAL val[numProjAttrs];
+            for (int i = 0; i < numProjAttrs; ++i) {
+                memcpy(val[i].attrName, attr[i].attrName, attr[i].attrLen);
+                val[i].valLength = attr[i].attrLen;
+                val[i].valType = attr[i].attrType;
+            }
+            int c = 0;
+            for (int i = 0; i < numProjAttrs; ++i) {
+                val[i].value = "";
+                for (int j = 0; j < val[i].valLength; ++j, ++c) {
+                    value[j] = new_rec[c];
+                    value[j + 1] = '\0';
+                }
+            }
+            int error = Insert(resRelName, numProjAttrs, val);
+            if (error != FEE_OK)
+                return error;
+
+            recid = HF_FindNextRec(sd, (char *)&record);
+        }
+    }
+
+    return FEE_OK;
 }
