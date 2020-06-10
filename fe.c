@@ -549,12 +549,15 @@ int get_hf_fd(const char *relName)
 ATTRDESCTYPE * getAttr(const char *relName,const char *attrName)
 {
     ATTRDESCTYPE *attr_node = attr_head;
-
+    int f=0;
     while (attr_node != NULL)
-        if (attr_node->relname == relName && attrName == attr_node->attrname)
-            return attr_node;
+        if (strcmp(attr_node->relname,relName)==0)
+        {
+            f=1;
+            if(strcmp(attrName, attr_node->attrname)==0)return attr_node;
+        }
 
-    return NULL;
+    return f==1?0:1;
     
 }
 int makeBytesAligned(const char *relName, int numAttrs, ATTR_VAL values[], char * bytes
