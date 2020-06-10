@@ -487,6 +487,105 @@ void DBcreate(const char *dbname){
 	DBclose(dbname);
 }
 
+
+
+
+typedef struct {
+	char fileName[256];
+    int fd;
+} openHfFd;
+typedef struct {
+	char fileName[256];
+    int fd;
+    int indexNo;
+} openAmFd;
+
+
+int get_am_fd(const char *relName, int indexNo)
+{
+    static openAmFd amFds[AM_ITAB_SIZE];
+
+    for(int idx=0;idx<AM_ITAB_SIZE;idx++)
+        if(strcmp(amFds[idx].fileName, relName)==0&&amFds[idx].indexNo==indexNo)
+            return amFds[idx].fd;
+    
+    int fd;
+    if ((fd = AM_OpenIndex(relName, indexNo)) < 0)return fd;
+        
+    for(int idx=0;idx<AM_ITAB_SIZE;idx++)
+        if(amFds[idx].fileName[0]=='\0')
+        {
+            strcpy(amFds[idx].fileName, relName);
+            amFds[idx].indexNo=indexNo;
+            amFds[idx].fd=fd;            
+            return fd;
+        }
+        
+    return -1;
+   
+}
+int get_hf_fd(const char *relName)
+{
+    static openHfFd hfFds[HF_FTAB_SIZE];
+    
+    for(int idx=0;idx<HF_FTAB_SIZE;idx++)
+        if(strcmp(hfFds[idx].fileName, relName)==0)
+            return hfFds[idx].fd;
+    
+    int fd;
+    if ((fd = HF_OpenFile(relName)) < 0)return fd;
+        
+    for(int idx=0;idx<HF_FTAB_SIZE;idx++)
+        if(hfFds[idx].fileName[0]=='\0')
+        {
+            strcpy(hfFds[idx].fileName, relName);
+            hfFds[idx].fd=fd;            
+            return fd;
+        }
+        
+    return -1;
+}
+
+ATTRDESCTYPE * getAttr(const char *relName,const char *attrName)
+{
+    ATTRDESCTYPE *attr_node = attr_head;
+
+    while (attr_node != NULL)
+        if (attr_node->relname == relName && attrName == attr_node->attrname)
+            return attr_node;
+
+    return NULL;
+    
+}
+int makeBytesAligned(const char *relName, int numAttrs, ATTR_VAL values[], char * bytes
+                    , int indexNo[], char indexVal[][PAGE_SIZE])
+{
+    int numIndex=0;
+    ATTRDESCTYPE *attr_node = attr_head;
+    int attrIdx = -1;
+    while (attr_node != NULL){
+        if (attr_node->relname == relName) {
+            for (attrIdx = 0; attrIdx < numAttrs; attrIdx++) 
+                if (strcmp(values[attrIdx].attrName, attr_node->attrname)==0)break;
+
+            if(attrIdx == numAttrs)return -2;
+            
+            memcpy(bytes, values[attrIdx].value, attr_node->attrlen);
+            bytes += attr_node->attrlen;
+            
+            if(indexNo != NULL && attr_node->indexed) {
+                indexNo[numIndex] = attr_node->attrno;
+                memcpy(indexVal[numIndex], values[attrIdx].value, attr_node->attrlen);
+                numIndex++;
+            }
+        }
+        attr_node = attr_node->next;
+    }  
+    if(attrIdx == -1)return -1;
+    return numIndex;
+}
+
+
 int  Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
     char record[PAGE_SIZE] = "";
     int indexNo[MAXN], n = 0;
@@ -728,3 +827,75 @@ int Select(const char *srcRelName, const char *selAttr, int op, int valType, int
 
     return FEE_OK;
 }
+
+int  Join(REL_ATTR *joinAttr1,		/* join attribute #1            */
+		int op,			/* comparison operator          */
+		REL_ATTR *joinAttr2,	/* join attribute #2            */
+		int numProjAttrs,	/* number of attrs to print     */
+		REL_ATTR projAttrs[],	/* names of attrs to print      */
+		char *resRelName)	/* result relation name         */
+{
+    REL_ATTR driving=*joinAttr1;    
+    REL_ATTR driven=*joinAttr2;    
+    ATTRDESCTYPE *drivingAttr = getAttr(driving.relName, driving.attrName);
+    ATTRDESCTYPE *drivenAttr = getAttr(driven.relName, driven.attrName);
+    
+    int drivingFd=get_hf_fd(driving.relName);
+    int drivenFd=get_hf_fd(driven.relName);
+
+    char drivingRec[PAGE_SIZE];    
+    char drivenRec[PAGE_SIZE];        
+
+    ATTR_VAL values[numProjAttrs];
+    ATTR_DESCR attrs[numProjAttrs];
+    char name[numProjAttrs][255];
+  
+    for(int i=0; i<numProjAttrs;i++)
+    {
+        ATTRDESCTYPE *attrNode=getAttr(projAttrs[i].relName,projAttrs[i].attrName);
+        snprintf(name[i], 255, "%s.%s", attrNode->relname, attrNode->attrname);
+        attrs[i].attrName=name[i];
+        attrs[i].attrType=attrNode->attrtype;
+        attrs[i].attrLen=attrNode->attrlen;
+        values[i].attrName=name[i];
+        values[i].valType=attrNode->attrtype;
+        values[i].valLength=attrNode->attrlen;
+    }
+
+    int error = CreateTable(resRelName, numProjAttrs, attrs, NULL);
+    if (error != FEE_OK)return error;
+    
+    RECID next_recid = HF_GetFirstRec(drivingFd, drivingRec);
+    
+    while (HF_ValidRecId(drivingFd,next_recid)){
+        int sd;
+        char * value = drivingRec + drivingAttr->offset;
+        
+        
+        if((sd = HF_OpenFileScan(drivenFd,drivenAttr->attrtype,drivenAttr->attrlen,drivenAttr->offset,EQ_OP,value))<0)
+            return FE_SAVE_ERROR(FEE_INVALIDSCAN);
+        
+        RECID recid = HF_FindNextRec(sd, drivenRec);
+
+        while (HF_ValidRecId(drivenFd, recid))
+        {
+            for(int i=0; i<numProjAttrs;i++)
+            {
+                ATTRDESCTYPE *attrNode=getAttr(projAttrs[i].relName,projAttrs[i].attrName);
+		values[i].value = attrNode->offset + (strcmp(projAttrs[i].relName,driving.relName)==0?drivingRec:drivenRec);
+	    }
+            error = Insert(resRelName, numProjAttrs, values);
+            if (error != FEE_OK)return error;            
+            recid = HF_FindNextRec(sd,drivenRec);
+        }
+
+        if (HF_CloseFileScan(sd) != HFE_OK) 
+            return FE_SAVE_ERROR(FEE_INVALIDSCAN);
+    
+        
+        next_recid = HF_GetNextRec(drivingFd, next_recid, drivingRec);
+    }
+    return 	FEE_OK;
+}
+
+    
