@@ -638,10 +638,8 @@ int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
 
     for(int x =0;x<MAXISCANS;x++){
         AMScan s = Scan_Table[x];
-         printf("ddddddd %d %d %d %d %d %d %d\n",s.opened, s.curr.nodeId.pagenum,n->id.pagenum,s.curr.nodeId.recnum,n->id.recnum,s.curr.index,i);
 		if(s.opened==1&&s.curr.nodeId.pagenum==n->id.pagenum&&s.curr.nodeId.recnum==n->id.recnum&&s.curr.index==i)
-        {   printf("ddddddd %s %d\n",key, x);
-            if(i+1==n->num_keys&&n->children[n->num_keys + 1].pagenum==-1)Scan_Table[x].curr.index=-1;else get_next_entry(s.fileDesc, &Scan_Table[x].curr);}}
+        {if(i+1==n->num_keys&&n->children[n->num_keys + 1].pagenum==-1)Scan_Table[x].curr.index=-1;else get_next_entry(s.fileDesc, &Scan_Table[x].curr);}}
 
 	// Shift keys accordingly
 	for (int j = i + 1; j < n->num_keys; j++)
@@ -988,7 +986,7 @@ int  AM_CloseIndexScan	(int scanDesc) {
 	if(scanDesc > MAXISCANS || Scan_Table[scanDesc].opened != 1)
 		 return AM_SAVE_ERROR(AME_INVALIDSCANDESC);
 	Scan_Table[scanDesc].opened = 0;
-    printf("tttt %d", scanDesc);
+
 	return AME_OK;
 }
 
