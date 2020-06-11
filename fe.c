@@ -814,15 +814,32 @@ int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_AT
 		drivingAttr = relAttr1 , drivenAttr = relAttr2;
 	else
 		drivingAttr = relAttr2 , drivenAttr = relAttr1;
-    int drivingFd = HF_OpenFile(drivingAttr->relname), drivenFd;
+    
+    if(drivingAttr == relAttr1)
+      switch(op)
+      {
+          case LT_OP : op=GT_OP;break;
+          case GT_OP : op=LT_OP;break;
+          case LE_OP : op=GE_OP;break;
+          case GE_OP : op=LE_OP;break;
+          default:break;
+      }
+      
+    int drivingFd = HF_OpenFile(drivingAttr->relname);
     if(drivingFd < 0) 
-		return FE_SAVE_ERROR(FEE_NOSUCHREL);
-    if(drivenAttr->indexed == FALSE)
-		drivenFd = HF_OpenFile(drivenAttr->relname);
-	else
-		drivenFd = AM_OpenIndex(drivenAttr->relname, drivenAttr->attrno);
+		return FE_SAVE_ERROR(FEE_HF);
+    int drivenFd = HF_OpenFile(drivenAttr->relname);
     if(drivenFd < 0) 
-		return FE_SAVE_ERROR(FEE_NOSUCHREL);
+		return FE_SAVE_ERROR(FEE_HF);  
+    
+    int innIdxfd;
+    if(drivenAttr->indexed == TRUE)
+    {
+		innIdxfd = AM_OpenIndex(drivenAttr->relname, drivenAttr->attrno);
+        if(innIdxfd < 0) 
+            return FE_SAVE_ERROR(FEE_AM);
+    }
+    
 	for(int i = 0; i < numProjAttrs; i++){
 		ATTRDESCTYPE *attrNode = getAttr(projAttrs[i].relName,projAttrs[i].attrName);
 		if(attrNode == 0)
@@ -856,17 +873,20 @@ int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_AT
 	char drivingRec[PAGE_SIZE], drivenRec[PAGE_SIZE];  
 	memset(drivingRec,'\0',sizeof drivingRec); memset(drivenRec,'\0',sizeof drivenRec);
     RECID next_recid = HF_GetFirstRec(drivingFd, drivingRec);
+    
     while (HF_ValidRecId(drivingFd, next_recid)){
+        
         int sd;
         char *value = drivingRec + drivingAttr->offset;
         if(drivenAttr->indexed == TRUE){
-            sd = AM_OpenIndexScan(drivenFd,op,value);
-            if(sd == AME_RECNOTFOUND) 
-				continue;
-            if(sd < 0)
-				return FE_SAVE_ERROR(FEE_INVALIDSCAN);
+            sd = AM_OpenIndexScan(innIdxfd,op,value);
+            
+            if(sd != AME_RECNOTFOUND&&sd<0)return FE_SAVE_ERROR(FEE_INVALIDSCAN);
+            
             RECID recid = AM_FindNextEntry(sd);
+            
             while (HF_ValidRecId(drivenFd, recid)){
+                 
                 if (HF_GetThisRec(drivenFd, recid, drivenRec) != HFE_OK)
                     return FE_SAVE_ERROR(FEE_INVALIDSCAN);
                 
@@ -888,8 +908,7 @@ int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_AT
                 }
                 recid = AM_FindNextEntry(sd);
 			}
-            if (AM_CloseIndexScan(sd) != AME_OK) 
-                return FE_SAVE_ERROR(FEE_INVALIDSCAN);
+            AM_CloseIndexScan(sd);
         }
         else{
             if((sd = HF_OpenFileScan(drivenFd,drivenAttr->attrtype,drivenAttr->attrlen,drivenAttr->offset,op,value)) < 0)
@@ -921,6 +940,15 @@ int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_AT
         }
         next_recid = HF_GetNextRec(drivingFd, next_recid, drivingRec);
     }
+    if(HF_CloseFile(drivingFd) < 0)
+        return FE_SAVE_ERROR(FEE_HF);
+    if(HF_CloseFile(drivenFd) < 0)
+        return FE_SAVE_ERROR(FEE_HF);  
+
+    if(drivenAttr->indexed == TRUE)
+        if(AM_CloseIndex(innIdxfd) < 0)
+            return FE_SAVE_ERROR(FEE_AM);
+        
 	if(resRelName == NULL){
 		PrintTable("stdout");
 		int destroy_errno = DestroyTable("stdout");
