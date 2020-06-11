@@ -548,7 +548,6 @@ void find_less(int fd, B_node *root, char *key, entry *first, entry *last) {
 B_node *get_last_Bnode(int fd, B_node *root) {
     B_node *c = root;
     while (!c->is_leaf) {
-        printf("LAST %d\n", c->id.pagenum);
         c = (B_node*)get_Bnode(fd, c->children[c->num_keys]);
     }
     return c;
@@ -875,14 +874,14 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 			
 	if(i==MAXISCANS)
 		return AM_SAVE_ERROR(AME_SCANTABLEFULL);
-		
-	Scan_Table[i].opened = 1;
-	Scan_Table[i].fileDesc = fileDesc;
-	Scan_Table[i].op = op;
+    
 	
 	B_node * root = get_Bnode(fileDesc,  rootarry[fileDesc]);
 	if(root==NULL)return AM_SAVE_ERROR(AME_FD);
-		int t = 50;
+
+	Scan_Table[i].opened = 1;
+	Scan_Table[i].fileDesc = fileDesc;
+	Scan_Table[i].op = op;    
 	switch(op){
 	 	case EQ_OP :
 			find_equal(fileDesc, root,  value, &Scan_Table[i].first, &Scan_Table[i].last);
@@ -921,6 +920,7 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 
 	 		break;
 	 	default :
+            Scan_Table[i].opened = 0;
 	 		return AM_SAVE_ERROR(AME_INVALIDOP);
 	 }
 	 
@@ -931,7 +931,7 @@ int  AM_OpenIndexScan	(int fileDesc, int op, char *value) {
 		Scan_Table[i].curr.index = -1;
 
 	}	 
-	if(Scan_Table[i].curr.index == -1) return AM_SAVE_ERROR(AME_RECNOTFOUND);
+	//if(Scan_Table[i].curr.index == -1) return AM_SAVE_ERROR(AME_RECNOTFOUND);
     
 	 unpinAll(fileDesc, FALSE);
 	 return i;
@@ -998,3 +998,4 @@ void AM_PrintError	(const char *errString) {
     fprintf(stderr, "%s\n", errString);
     fprintf(stderr, "%d\n", AMerrno);
 }
+
