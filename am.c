@@ -7,6 +7,8 @@
 #include "bf.h"
 #include "pf.h"
 #include "hf.h"
+#include <math.h>
+#include <stdlib.h>
 #define ORDER 8
 
 struct B_node;
@@ -52,13 +54,13 @@ typedef struct{
 //test2
 static AMScan Scan_Table[MAXISCANS];
 
-
+int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key, B_node *right) ;
 #define unpinPage(fd, nodeId, dirty)  PF_UnpinPage(fd, nodeId.pagenum, dirty)
 int ldpn[10000];
 char * ldp[10000];
 int cntforld;
 int AMerrno = 0;
-char *findld(pn)
+char *findld(int pn)
 {
 	int i;
 	for(i=0;i<cntforld;i++)
@@ -182,13 +184,13 @@ int delete_Bnode(int fd, RECID nodeId) {
 	if(pagebuf == NULL)
 	{
 		if(PF_GetThisPage(fd, nodeId.pagenum, &pagebuf) != PFE_OK)
-			return NULL;
+			return 0;
 
 		setld(nodeId.pagenum, pagebuf);
 	}
 	
 	int cnt = *(int*)pagebuf;
-    if(cnt==0)return NULL;
+    if(cnt==0)return 0;
     
 	cnt--;
 	memcpy(pagebuf, &cnt, sizeof(int));
@@ -231,14 +233,50 @@ int compare(int fd, char *key1, char *key2) {
     if (type == 'i')
         return (*(int *)key1) - (*(int *)key2);
     if (type == 'f')
-        return (*(float *)key1) - (*(float *)key2);
+        return fabs((*(float *)key1) - (*(float *)key2))<0.00001?0:((*(float *)key1)>(*(float *)key2)?1:-1);
     return strncmp(key1, key2, header[fd].length);
+}
+
+int insert_into_parent(int fd, B_node *root, B_node *left, B_node *right, char *key) {
+	if (left->parent.recnum == -1) {
+        B_node *new_root = make_Bnode(fd);
+        if(new_root==NULL) return 0;
+        memcpy(get_key(fd, new_root->id, 0), key, header[fd].length);
+        new_root->children[0] = left->id;
+        new_root->children[1] = right->id;
+        new_root->num_keys++;
+        new_root->parent.recnum = -1;
+        left->parent = new_root->id;
+        right->parent = new_root->id;
+        //printf("ROOT %d %d %d\n", new_root->id.pagenum, *(int *)get_key(fd, new_root->id, 0), *(int *)key);
+        rootarry[fd] = new_root->id;
+        return 1;
+	}
+
+	B_node *parent = get_Bnode(fd, left->parent);
+	if(parent==NULL) return 0;
+	int left_index = 0;
+    while (left_index <= parent->num_keys && !(parent->children[left_index].pagenum == left->id.pagenum&&parent->children[left_index].recnum == left->id.recnum))
+        left_index++;
+
+	if (parent->num_keys < order - 1) {
+        for (int i = parent->num_keys; i > left_index; i--) {
+            parent->children[i + 1] = parent->children[i];
+            memcpy(get_key(fd, parent->id, i), get_key(fd, parent->id, i - 1), header[fd].length);
+        }
+        parent->children[left_index + 1] = right->id;
+        memcpy(get_key(fd, parent->id, left_index), key, header[fd].length);
+        parent->num_keys++;
+        return 1;
+	}
+    if (nodeSplit(fd, root, parent, left_index, key, right) == 0) return 0;
+	return 1;
 }
 
 int leafSplit(int fd, B_node *root, B_node *leaf, char *key, RECID recId) {
 	B_node *new_leaf = make_leaf(fd);
 	//printf("%d ", new_leaf->id.pagenum);
-	if(new_leaf==NULL) return NULL;
+	if(new_leaf==NULL) return 0;
 
 	char *temp_keys[order];
 	for (int i = 0; i < order; ++i)
@@ -319,7 +357,7 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
 	memcpy(temp_keys[left_index], key, header[fd].length);
 
 	B_node *new_node = make_Bnode(fd);
-	if(new_node==NULL) return NULL;
+	if(new_node==NULL) return 0;
 	old_node->num_keys = order / 2 - 1;
 	if (order % 2 == 1)
         old_node->num_keys++;
@@ -346,7 +384,7 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
 	new_node->parent = old_node->parent;
 	for (int i = 0; i <= new_node->num_keys; i++) {
         B_node *child = get_Bnode(fd, new_node->children[i]);
-        if(child==NULL) return NULL;
+        if(child==NULL) return 0;
 		child->parent = new_node->id;
 	}
 	/*printf("NEW NODE %d %d %d\n", new_node->id.pagenum, *(int *)key, new_node->num_keys);
@@ -365,41 +403,7 @@ int nodeSplit(int fd, B_node *root, B_node *old_node, int left_index, char *key,
     return 1;
 }
 
-int insert_into_parent(int fd, B_node *root, B_node *left, B_node *right, char *key) {
-	if (left->parent.recnum == -1) {
-        B_node *new_root = make_Bnode(fd);
-        if(new_root==NULL) return NULL;
-        memcpy(get_key(fd, new_root->id, 0), key, header[fd].length);
-        new_root->children[0] = left->id;
-        new_root->children[1] = right->id;
-        new_root->num_keys++;
-        new_root->parent.recnum = -1;
-        left->parent = new_root->id;
-        right->parent = new_root->id;
-        //printf("ROOT %d %d %d\n", new_root->id.pagenum, *(int *)get_key(fd, new_root->id, 0), *(int *)key);
-        rootarry[fd] = new_root->id;
-        return 1;
-	}
 
-	B_node *parent = get_Bnode(fd, left->parent);
-	if(parent==NULL) return NULL;
-	int left_index = 0;
-    while (left_index <= parent->num_keys && !(parent->children[left_index].pagenum == left->id.pagenum&&parent->children[left_index].recnum == left->id.recnum))
-        left_index++;
-
-	if (parent->num_keys < order - 1) {
-        for (int i = parent->num_keys; i > left_index; i--) {
-            parent->children[i + 1] = parent->children[i];
-            memcpy(get_key(fd, parent->id, i), get_key(fd, parent->id, i - 1), header[fd].length);
-        }
-        parent->children[left_index + 1] = right->id;
-        memcpy(get_key(fd, parent->id, left_index), key, header[fd].length);
-        parent->num_keys++;
-        return 1;
-	}
-    if (nodeSplit(fd, root, parent, left_index, key, right) == 0) return 0;
-	return 1;
-}
 
 B_node *find_leaf(int fd, B_node *root, char *key) {
 	B_node *c = root;
@@ -663,16 +667,16 @@ int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
     }
 	if (n == root) {
         if (root->num_keys > 0)
-            return root;
+            return 1;
         B_node *new_root = NULL;
         if (!root->is_leaf) {
             new_root = get_Bnode(fd, root->children[0]);
-            if (new_root == NULL) return NULL;
+            if (new_root == NULL) return 0;
             new_root->parent.pagenum = -1;
         }
         else {
             new_root = make_leaf(fd);
-            if (new_root == NULL) return NULL;
+            if (new_root == NULL) return 0;
         }
         rootarry[fd] = new_root->id;
         delete_Bnode(fd, root->id);
@@ -684,7 +688,7 @@ int delete_entry(int fd, B_node *root, B_node *n, char *key, RECID record) {
 int delete(int fd, B_node *root, char *key, RECID rid) {//test4 add param
 	RECID key_record = {-1, -1};
 	if (root == NULL) {
-        return NULL;
+        return 0;
     }
 	B_node *leaf = find_leaf(fd, root, key);
 	for (int i = 0; i < leaf->num_keys; i++)
