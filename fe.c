@@ -16,6 +16,9 @@
 #define MAXSTRINGLEN 255
 #define RELCAT_NUM_ATTRS 5
 #define ATTRCAT_NUM_ATTRS 7
+ATTR_VAL values[MAXN];
+ATTR_DESCR attrs[MAXN];
+int offset[MAXN];
 ATTR_DESCR out_attrs[ATTRCAT_NUM_ATTRS];
 ATTR_DESCR in_attrs[RELCAT_NUM_ATTRS];
 ATTR_DESCR attributes[MAXN],project[MAXN];
@@ -221,17 +224,19 @@ int DropIndex(const char *relname, const char *attrName){
 	if(strlen(attrName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_ATTRNAMETOOLONG);
 	ATTRDESCTYPE *attr_node = attr_head;
+	int cnt = 0; //Number of dropped indexes
 	while(attr_node != NULL){
 		if(equal_rel_name(attr_node->relname,relname) && (attrName == NULL || equal_rel_name(attr_node->attrname,attrName))){
 			AM_DestroyIndex(relname,attr_node->attrno);
 			attr_node->indexed = FALSE;
+			cnt++;
 		}
 		attr_node = attr_node->next;
 	}
 	RELDESCTYPE *rel_node = rel_head;
 	while(rel_node != NULL){
 		if(equal_rel_name(rel_node->relname,relname)){
-			rel_node->indexcnt--;
+			rel_node->indexcnt -= cnt;
 			break;
 		}
 		rel_node = rel_node->next;
@@ -354,7 +359,6 @@ int LoadTable(const char *relName, const char *fileName){
 	}
 
 	int indexNo[MAXN], id = 0, cur = 0;
-    char indexedAttr[MAXN][PAGE_SIZE];
     ATTRDESCTYPE *attr_node = attr_head;
     while (attr_node != NULL) {
         if (strcmp(attr_node->relname, relName) == 0) {
@@ -388,7 +392,10 @@ int LoadTable(const char *relName, const char *fileName){
 		return FE_SAVE_ERROR(FEE_HF);
 	return FEE_OK;
 }
+char spc[]="relcat";
 int HelpTable(const char *relName){
+	if(relName == NULL)
+		relName = spc;
 	if(strlen(relName) > MAXNAME)
 		return FE_SAVE_ERROR(FEE_RELNAMETOOLONG);
 	RELDESCTYPE *rel_node = rel_head;
@@ -518,23 +525,22 @@ void DBcreate(const char *dbname){
 		FE_PrintError("Relation creation failed in create_student");
 	DBclose(dbname);
 }
+char indexedAttr[MAXN][PAGE_SIZE];
 int Insert(const char *relName, int numAttrs, ATTR_VAL values[]) {
     char record[PAGE_SIZE];
-	memset(record,'\0',sizeof record);
     int indexNo[MAXN], id = 0;
-    char indexedAttr[MAXN][PAGE_SIZE];
     ATTRDESCTYPE *attr_node = attr_head;
 	int cur = 0;//total tuple size
     while (attr_node != NULL) {
         if (strcmp(attr_node->relname, relName) == 0) {
-			int id = -1;
+			int ids = -1;
             for (int i = 0; i < numAttrs; ++i) 
                 if (strcmp(values[i].attrName, attr_node->attrname) == 0) {
 					for(int j = 0; j < attr_node->attrlen; j++)
 						record[cur++] = values[i].value[j];
-					id = i;
+					ids = i;
 				}
-            if (id == -1)
+            if (ids == -1)
                 return FE_SAVE_ERROR(FEE_NOSUCHATTR);
 
             if (attr_node->indexed) {
@@ -571,7 +577,6 @@ int Delete(const char *relName, const char *selAttr, int op, int valType, int va
     if (selAttr == NULL)
         return DestroyTable(relName);
 	int indexNo[MAXN], id = 0, cur = 0;
-    char indexedAttr[MAXN][PAGE_SIZE];
     ATTRDESCTYPE *attr_node = attr_head;
     while (attr_node != NULL) {
         if (strcmp(attr_node->relname, relName) == 0) {
@@ -605,7 +610,6 @@ int Delete(const char *relName, const char *selAttr, int op, int valType, int va
         if ((sd = AM_OpenIndexScan(am_fd, op, value)) < 0)
             return FE_SAVE_ERROR(FEE_AM);
         char del[PAGE_SIZE];
-        memset(del, '\0', PAGE_SIZE);
         while (1) {
             RECID recid = AM_FindNextEntry(sd);
             if (!HF_ValidRecId(hf_fd, recid)){
@@ -646,7 +650,6 @@ int Delete(const char *relName, const char *selAttr, int op, int valType, int va
             return FE_SAVE_ERROR(FEE_HF);
 
     	char record[PAGE_SIZE];
-		memset(record,'\0',sizeof record);
         RECID recid = HF_FindNextRec(sd, (char *)&record);
         while (HF_ValidRecId(hf_fd, recid)) {
             if (HF_DeleteRec(hf_fd, recid) != 0)
@@ -668,6 +671,19 @@ int Delete(const char *relName, const char *selAttr, int op, int valType, int va
         return FE_SAVE_ERROR(FEE_HF);
     return FEE_OK;
 }
+ATTRDESCTYPE * getAttr(const char *relName,const char *attrName){
+    ATTRDESCTYPE *attr_node = attr_head;
+	int flag = 0;
+    while (attr_node != NULL){
+        if (strcmp(attr_node->relname,relName) == 0){
+            if(strcmp(attrName, attr_node->attrname) == 0)
+				return attr_node;
+			flag = 1;
+        }
+		attr_node = attr_node->next;
+	}
+    return flag;   
+}
 int Select(const char *srcRelName, const char *selAttr, int op, int valType, int valLength, char *value, 
 					int numProjAttrs, char *projAttrs[], char *resRelName) {
 	ATTRDESCTYPE *attr_node = attr_head;
@@ -687,6 +703,11 @@ int Select(const char *srcRelName, const char *selAttr, int op, int valType, int
 				make_assign(&project[j],attributes[i].attrName,attributes[i].attrType,attributes[i].attrLen);
 	int create_error , fd;
 	if(resRelName != NULL){
+		if(getAttr(resRelName," ") == 1){//If table already exist, then destroy
+			int destroy_errno = DestroyTable(resRelName);
+			if(destroy_errno != 0)
+				return FE_SAVE_ERROR(destroy_errno);
+		}
 		create_error = CreateTable(resRelName, numProjAttrs, project, NULL);
 		fd = HF_OpenFile(resRelName);
 	}
@@ -721,6 +742,7 @@ int Select(const char *srcRelName, const char *selAttr, int op, int valType, int
             return FE_SAVE_ERROR(FEE_AM);
 
         char A[PAGE_SIZE],B[PAGE_SIZE];
+		memset(A,'\0',sizeof A); memset(B,'\0',sizeof B);
         while (1) {
             RECID recid = AM_FindNextEntry(sd);
             if (!HF_ValidRecId(hf_fd, recid)){
@@ -729,7 +751,6 @@ int Select(const char *srcRelName, const char *selAttr, int op, int valType, int
                 else
                     return FE_SAVE_ERROR(FEE_AM);
 			}
-			memset(A,'\0',sizeof A); memset(B,'\0',sizeof B);
             if (HF_GetThisRec(hf_fd, recid, A) != HFE_OK)
                 return FE_SAVE_ERROR(FEE_HF);
 			
@@ -783,22 +804,6 @@ int Select(const char *srcRelName, const char *selAttr, int op, int valType, int
 	}
     return FEE_OK;
 }
-ATTRDESCTYPE * getAttr(const char *relName,const char *attrName){
-    ATTRDESCTYPE *attr_node = attr_head;
-	int flag = 0;
-    while (attr_node != NULL){
-        if (strcmp(attr_node->relname,relName) == 0){
-            if(strcmp(attrName, attr_node->attrname) == 0)
-				return attr_node;
-			flag = 1;
-        }
-		attr_node = attr_node->next;
-	}
-    return flag;   
-}
-ATTR_VAL values[MAXN];
-ATTR_DESCR attrs[MAXN];
-int offset[MAXN];
 int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_ATTR projAttrs[],	char *resRelName){
 	if(strcmp(joinAttr1->relName,joinAttr2->relName) == 0)
 		return FE_SAVE_ERROR(FEE_SAMEJOINEDREL);    
@@ -860,6 +865,11 @@ int  Join(REL_ATTR *joinAttr1,int op,REL_ATTR *joinAttr2,int numProjAttrs,REL_AT
 	}
 	int error;
 	if(resRelName != NULL){
+		if(getAttr(resRelName," ") == 1){ //If table already exist, then destroy
+			int destroy_errno = DestroyTable(resRelName);
+			if(destroy_errno != 0)
+				return FE_SAVE_ERROR(destroy_errno);
+		}
 		error = CreateTable(resRelName, numProjAttrs, attrs, NULL);
 		if (error != FEE_OK)
 			return error;
